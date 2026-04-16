@@ -84,6 +84,13 @@ bdb stop com.defaultcompany.boardbinho
 - Preferred command: `./scripts/unity_build_android.sh --install`
 - If Unity licensing or stale headless editor processes block the build, retry with `./scripts/unity_build_android.sh --clean-stale --install`
 
+## Default git workflow
+
+- For implementation tasks in this repo, automatically create and use a dedicated `git worktree` unless the user explicitly asks to stay in the current checkout.
+- Use a branch name with the `codex/` prefix by default when creating that worktree.
+- Keep review-only, debugging-only, or analysis-only tasks in the current checkout unless the user asks for isolation anyway.
+- If the user has already prepared the correct branch or worktree, continue there instead of creating another one.
+
 ## Debug order
 
 1. Verify Board project setup
