@@ -617,6 +617,7 @@ namespace BoardBinho
                 return;
             }
 
+            TryCompleteShotTurnIfSettled();
             HandleBoardFingerShotInput();
 
             if (m_EnableMouseFallback && !m_HandledBoardShotThisFrame)
@@ -647,10 +648,13 @@ namespace BoardBinho
                     continue;
                 }
 
-                TryLaunchSwipe(
+                if (TryLaunchSwipe(
                     swipeContact.WorldPosition,
                     worldPosition,
-                    Mathf.Max((float)(timestamp - swipeContact.Timestamp), 1f / 240f));
+                    Mathf.Max((float)(timestamp - swipeContact.Timestamp), 1f / 240f)))
+                {
+                    return;
+                }
 
                 m_BoardSwipeContacts[contact.contactId] = new SwipeContactState
                 {
@@ -695,7 +699,7 @@ namespace BoardBinho
 
             if (!m_MouseShotActive)
             {
-                if (mouse.leftButton.wasPressedThisFrame)
+                if (mouse.leftButton.isPressed)
                 {
                     m_MouseShotActive = true;
                     m_LastMouseWorld = worldPosition;
@@ -705,10 +709,15 @@ namespace BoardBinho
                 return;
             }
 
-            TryLaunchSwipe(
+            if (TryLaunchSwipe(
                 m_LastMouseWorld,
                 worldPosition,
-                Mathf.Max(Time.unscaledTime - m_LastMouseSampleTime, 1f / 240f));
+                Mathf.Max(Time.unscaledTime - m_LastMouseSampleTime, 1f / 240f)))
+            {
+                m_LastMouseWorld = worldPosition;
+                m_LastMouseSampleTime = Time.unscaledTime;
+                return;
+            }
 
             m_LastMouseWorld = worldPosition;
             m_LastMouseSampleTime = Time.unscaledTime;
@@ -752,11 +761,7 @@ namespace BoardBinho
                 return false;
             }
 
-            if (m_Phase == MatchPhase.BallInMotion)
-            {
-                CompleteShotTurn();
-            }
-
+            TryCompleteShotTurnIfSettled();
             return m_Phase == MatchPhase.ReadyToShoot;
         }
 
@@ -818,10 +823,21 @@ namespace BoardBinho
                 return;
             }
 
+            CancelActiveShot();
             StopBall();
             m_BallStillTimer = 0f;
             m_CurrentTurn = m_CurrentTurn == PlayerSide.Left ? PlayerSide.Right : PlayerSide.Left;
             m_Phase = MatchPhase.ReadyToShoot;
+        }
+
+        private void TryCompleteShotTurnIfSettled()
+        {
+            if (m_Phase != MatchPhase.BallInMotion || m_BallStillTimer < kBallRestTime)
+            {
+                return;
+            }
+
+            CompleteShotTurn();
         }
 
         private void UpdateAimLine()
@@ -856,10 +872,7 @@ namespace BoardBinho
                 m_BallStillTimer = 0f;
             }
 
-            if (m_Phase == MatchPhase.BallInMotion && m_BallStillTimer >= kBallRestTime)
-            {
-                CompleteShotTurn();
-            }
+            TryCompleteShotTurnIfSettled();
         }
 
         private void CheckForGoal()
