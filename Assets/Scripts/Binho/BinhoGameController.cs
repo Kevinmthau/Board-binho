@@ -13,30 +13,32 @@ namespace BoardBinho
     {
         private const float kFieldWidth = 16f;
         private const float kFieldHeight = 9f;
-        private const float kFieldLineInset = 0.18f;
+        private const float kFieldLineInset = 0.03f;
         private const float kWallThickness = 0.22f;
         private const float kGoalDepth = 0.9f;
         private const float kGoalHalfHeight = 0.95f;
-        private const float kGoalBoxDepth = 1.2f;
-        private const float kGoalBoxHalfHeight = 0.95f;
-        private const float kPenaltyBoxDepth = 2.6f;
-        private const float kPenaltyBoxHalfHeight = 1.9f;
+        private const float kGoalBoxDepth = 1.65f;
+        private const float kGoalBoxHalfHeight = 1.2f;
+        private const float kPenaltyBoxDepth = 3.45f;
+        private const float kPenaltyBoxHalfHeight = 2.45f;
         private const float kCenterCircleRadius = 1.3f;
         private const float kPenaltyArcRadius = 0.85f;
+        private const float kPenaltyMarkDistance = 2.2f;
         private const float kDefenderRadius = 0.32f;
         private const float kSlotSnapRadius = 0.95f;
         private const float kBallRadius = 0.2f;
-        private const float kBallDragActivationRadius = 0.5f;
-        private const float kMinShotDragDistance = 0.15f;
-        private const float kMaxShotDragDistance = 1.7f;
-        private const float kShotImpulseScale = 8.5f;
-        private const float kBallRestVelocity = 0.11f;
-        private const float kBallRestTime = 0.35f;
+        private const float kBallSwipeCaptureRadius = 0.55f;
+        private const float kMinSwipeTravelDistance = 0.05f;
+        private const float kMinSwipeSpeed = 2.5f;
+        private const float kMaxSwipeSpeed = 22f;
+        private const float kMinShotImpulse = 2.4f;
+        private const float kMaxShotImpulse = 14.5f;
+        private const float kBallRestVelocity = 0.35f;
+        private const float kBallRestTime = 0.1f;
         private const float kGoalPauseDuration = 1.15f;
 
         private static readonly Color kFieldColor = new Color(0.09f, 0.35f, 0.18f);
         private static readonly Color kFieldInnerTint = new Color(0.13f, 0.42f, 0.23f);
-        private static readonly Color kRailColor = new Color(0.83f, 0.83f, 0.83f);
         private static readonly Color kLineColor = new Color(0.96f, 0.96f, 0.94f);
         private static readonly Color kLeftColor = new Color(0.22f, 0.73f, 0.98f);
         private static readonly Color kRightColor = new Color(0.98f, 0.66f, 0.18f);
@@ -49,6 +51,8 @@ namespace BoardBinho
         private readonly List<DefenderSlot> m_LeftSlots = new List<DefenderSlot>();
         private readonly List<DefenderSlot> m_RightSlots = new List<DefenderSlot>();
         private readonly List<DefenderSlot> m_AllSlots = new List<DefenderSlot>();
+        private readonly Dictionary<int, SwipeContactState> m_BoardSwipeContacts = new Dictionary<int, SwipeContactState>();
+        private readonly List<int> m_ExpiredBoardSwipeContacts = new List<int>();
 
         private Material m_SpriteMaterial;
         private Sprite m_SquareSprite;
@@ -64,16 +68,60 @@ namespace BoardBinho
         private PlayerSide m_LastScoringSide = PlayerSide.Left;
         private int m_LeftScore;
         private int m_RightScore;
-        private int m_ActiveBoardContactId = -1;
         private bool m_MouseShotActive;
         private bool m_HandledBoardShotThisFrame;
         private float m_BallStillTimer;
         private float m_GoalPauseTimer;
         private bool m_DidServeInitialKickoff;
-        private Vector2 m_CurrentAimWorld;
+        private Vector2 m_LastMouseWorld;
+        private float m_LastMouseSampleTime;
 
-        private float FieldHalfWidth => kFieldWidth * 0.5f;
-        private float FieldHalfHeight => kFieldHeight * 0.5f;
+        private float BaseFieldHalfWidth => kFieldWidth * 0.5f;
+        private float BaseFieldHalfHeight => kFieldHeight * 0.5f;
+        private float ScreenHalfWidth => m_WorldCamera != null && m_WorldCamera.orthographic ? m_WorldCamera.orthographicSize * m_WorldCamera.aspect : BaseFieldHalfWidth;
+        private float ScreenHalfHeight => m_WorldCamera != null && m_WorldCamera.orthographic ? m_WorldCamera.orthographicSize : BaseFieldHalfHeight;
+        private float PitchHalfWidth => ScreenHalfWidth;
+        private float PitchHalfHeight => ScreenHalfHeight;
+        private float HorizontalFieldScale => PitchHalfWidth / BaseFieldHalfWidth;
+        private float VerticalFieldScale => PitchHalfHeight / BaseFieldHalfHeight;
+        private float UniformFieldScale => Mathf.Min(HorizontalFieldScale, VerticalFieldScale);
+        private float FieldLineInset => Scale(kFieldLineInset);
+        private float WallThickness => Scale(kWallThickness);
+        private float GoalDepth => ScaleX(kGoalDepth);
+        private float GoalHalfHeight => ScaleY(kGoalHalfHeight);
+        private float GoalBoxDepth => ScaleX(kGoalBoxDepth);
+        private float GoalBoxHalfHeight => ScaleY(kGoalBoxHalfHeight);
+        private float PenaltyBoxDepth => ScaleX(kPenaltyBoxDepth);
+        private float PenaltyBoxHalfHeight => ScaleY(kPenaltyBoxHalfHeight);
+        private float CenterCircleRadius => Scale(kCenterCircleRadius);
+        private float PenaltyArcRadius => Scale(kPenaltyArcRadius);
+        private float PenaltyMarkDistance => ScaleX(kPenaltyMarkDistance);
+        private float DefenderRadius => Scale(kDefenderRadius);
+        private float SlotSnapRadius => Scale(kSlotSnapRadius);
+        private float BallRadius => Scale(kBallRadius);
+        private float BallSwipeCaptureRadius => Scale(kBallSwipeCaptureRadius);
+        private float MinSwipeTravelDistance => Scale(kMinSwipeTravelDistance);
+        private float MinSwipeSpeed => Scale(kMinSwipeSpeed);
+        private float MaxSwipeSpeed => Scale(kMaxSwipeSpeed);
+        private float MinShotImpulse => Scale(kMinShotImpulse);
+        private float MaxShotImpulse => Scale(kMaxShotImpulse);
+        private float BallRestVelocity => Scale(kBallRestVelocity);
+        private float GoalScoreDepth => Mathf.Max(BallRadius * 0.6f, GoalDepth * 0.2f);
+
+        private float ScaleX(float value)
+        {
+            return value * HorizontalFieldScale;
+        }
+
+        private float ScaleY(float value)
+        {
+            return value * VerticalFieldScale;
+        }
+
+        private float Scale(float value)
+        {
+            return value * UniformFieldScale;
+        }
 
         private void Awake()
         {
@@ -217,45 +265,40 @@ namespace BoardBinho
             var fieldRoot = new GameObject("Binho Field");
             fieldRoot.transform.SetParent(transform, false);
 
-            CreateQuad(fieldRoot.transform, "Outer Rail", Vector2.zero, new Vector2(kFieldWidth + 0.7f, kFieldHeight + 0.7f), kRailColor, -0.15f, -5);
-            CreateQuad(fieldRoot.transform, "Field Surface", Vector2.zero, new Vector2(kFieldWidth, kFieldHeight), kFieldColor, -0.1f, -4);
-            CreateQuad(fieldRoot.transform, "Field Inner", Vector2.zero, new Vector2(kFieldWidth - 0.4f, kFieldHeight - 0.4f), kFieldInnerTint, -0.09f, -3);
+            ConfigureCamera();
+
+            var boardSurfaceSize = new Vector2(ScreenHalfWidth * 2f, ScreenHalfHeight * 2f);
+            CreateQuad(fieldRoot.transform, "Field Surface", Vector2.zero, boardSurfaceSize, kFieldColor, -0.1f, -4);
+            CreateQuad(fieldRoot.transform, "Field Wash", Vector2.zero, boardSurfaceSize, new Color(kFieldInnerTint.r, kFieldInnerTint.g, kFieldInnerTint.b, 0.48f), -0.09f, -3);
 
             BuildWalls(fieldRoot.transform);
             BuildFieldLines(fieldRoot.transform);
             BuildSlots(fieldRoot.transform);
             BuildBall(fieldRoot.transform);
-
-            if (m_WorldCamera != null)
-            {
-                m_WorldCamera.orthographic = true;
-                m_WorldCamera.orthographicSize = 5.5f;
-                m_WorldCamera.transform.position = new Vector3(0f, 0f, -10f);
-                m_WorldCamera.backgroundColor = new Color(0.05f, 0.08f, 0.06f);
-            }
         }
 
         private void BuildWalls(Transform parent)
         {
-            var upperWallHeight = FieldHalfHeight - kGoalHalfHeight;
-            var upperWallCenterY = kGoalHalfHeight + (upperWallHeight * 0.5f);
-            var goalBackX = FieldHalfWidth + kGoalDepth + (kWallThickness * 0.5f);
-            var goalInteriorX = FieldHalfWidth + (kGoalDepth * 0.5f);
+            var upperWallHeight = PitchHalfHeight - GoalHalfHeight;
+            var upperWallCenterY = GoalHalfHeight + (upperWallHeight * 0.5f);
+            var sideWallX = PitchHalfWidth + (WallThickness * 0.5f);
+            var goalBackX = PitchHalfWidth + GoalDepth + (WallThickness * 0.5f);
+            var goalInteriorX = PitchHalfWidth + (GoalDepth * 0.5f);
 
-            CreateWall(parent, "Top Wall", new Vector2(0f, FieldHalfHeight + (kWallThickness * 0.5f)), new Vector2(kFieldWidth, kWallThickness));
-            CreateWall(parent, "Bottom Wall", new Vector2(0f, -FieldHalfHeight - (kWallThickness * 0.5f)), new Vector2(kFieldWidth, kWallThickness));
+            CreateWall(parent, "Top Wall", new Vector2(0f, PitchHalfHeight + (WallThickness * 0.5f)), new Vector2(PitchHalfWidth * 2f, WallThickness));
+            CreateWall(parent, "Bottom Wall", new Vector2(0f, -PitchHalfHeight - (WallThickness * 0.5f)), new Vector2(PitchHalfWidth * 2f, WallThickness));
 
-            CreateWall(parent, "Left Upper Wall", new Vector2(-FieldHalfWidth - (kWallThickness * 0.5f), upperWallCenterY), new Vector2(kWallThickness, upperWallHeight));
-            CreateWall(parent, "Left Lower Wall", new Vector2(-FieldHalfWidth - (kWallThickness * 0.5f), -upperWallCenterY), new Vector2(kWallThickness, upperWallHeight));
-            CreateWall(parent, "Right Upper Wall", new Vector2(FieldHalfWidth + (kWallThickness * 0.5f), upperWallCenterY), new Vector2(kWallThickness, upperWallHeight));
-            CreateWall(parent, "Right Lower Wall", new Vector2(FieldHalfWidth + (kWallThickness * 0.5f), -upperWallCenterY), new Vector2(kWallThickness, upperWallHeight));
+            CreateWall(parent, "Left Upper Wall", new Vector2(-sideWallX, upperWallCenterY), new Vector2(WallThickness, upperWallHeight));
+            CreateWall(parent, "Left Lower Wall", new Vector2(-sideWallX, -upperWallCenterY), new Vector2(WallThickness, upperWallHeight));
+            CreateWall(parent, "Right Upper Wall", new Vector2(sideWallX, upperWallCenterY), new Vector2(WallThickness, upperWallHeight));
+            CreateWall(parent, "Right Lower Wall", new Vector2(sideWallX, -upperWallCenterY), new Vector2(WallThickness, upperWallHeight));
 
-            CreateWall(parent, "Left Goal Back", new Vector2(-goalBackX, 0f), new Vector2(kWallThickness, kGoalHalfHeight * 2f));
-            CreateWall(parent, "Right Goal Back", new Vector2(goalBackX, 0f), new Vector2(kWallThickness, kGoalHalfHeight * 2f));
-            CreateWall(parent, "Left Goal Roof", new Vector2(-goalInteriorX, kGoalHalfHeight + (kWallThickness * 0.5f)), new Vector2(kGoalDepth, kWallThickness));
-            CreateWall(parent, "Left Goal Floor", new Vector2(-goalInteriorX, -kGoalHalfHeight - (kWallThickness * 0.5f)), new Vector2(kGoalDepth, kWallThickness));
-            CreateWall(parent, "Right Goal Roof", new Vector2(goalInteriorX, kGoalHalfHeight + (kWallThickness * 0.5f)), new Vector2(kGoalDepth, kWallThickness));
-            CreateWall(parent, "Right Goal Floor", new Vector2(goalInteriorX, -kGoalHalfHeight - (kWallThickness * 0.5f)), new Vector2(kGoalDepth, kWallThickness));
+            CreateWall(parent, "Left Goal Back", new Vector2(-goalBackX, 0f), new Vector2(WallThickness, GoalHalfHeight * 2f));
+            CreateWall(parent, "Right Goal Back", new Vector2(goalBackX, 0f), new Vector2(WallThickness, GoalHalfHeight * 2f));
+            CreateWall(parent, "Left Goal Roof", new Vector2(-goalInteriorX, GoalHalfHeight + (WallThickness * 0.5f)), new Vector2(GoalDepth, WallThickness));
+            CreateWall(parent, "Left Goal Floor", new Vector2(-goalInteriorX, -GoalHalfHeight - (WallThickness * 0.5f)), new Vector2(GoalDepth, WallThickness));
+            CreateWall(parent, "Right Goal Roof", new Vector2(goalInteriorX, GoalHalfHeight + (WallThickness * 0.5f)), new Vector2(GoalDepth, WallThickness));
+            CreateWall(parent, "Right Goal Floor", new Vector2(goalInteriorX, -GoalHalfHeight - (WallThickness * 0.5f)), new Vector2(GoalDepth, WallThickness));
         }
 
         private void BuildFieldLines(Transform parent)
@@ -263,15 +306,14 @@ namespace BoardBinho
             var lineRoot = new GameObject("Field Lines");
             lineRoot.transform.SetParent(parent, false);
 
-            CreateRectangleLine(lineRoot.transform, "Boundary", new Vector2(kFieldWidth - (kFieldLineInset * 2f), kFieldHeight - (kFieldLineInset * 2f)), kLineColor, 0.07f);
-            CreateLine(lineRoot.transform, "Halfway", kLineColor, 0.06f, new[]
+            CreateLine(lineRoot.transform, "Halfway", kLineColor, Scale(0.06f), new[]
             {
-                new Vector3(0f, -FieldHalfHeight + kFieldLineInset, 0f),
-                new Vector3(0f, FieldHalfHeight - kFieldLineInset, 0f),
+                new Vector3(0f, -PitchHalfHeight + FieldLineInset, 0f),
+                new Vector3(0f, PitchHalfHeight - FieldLineInset, 0f),
             });
 
-            CreateCircleLine(lineRoot.transform, "Center Circle", Vector2.zero, kCenterCircleRadius, kLineColor, 0.06f, 48, 0f, 360f);
-            CreateDisc(parent, "Center Spot", Vector2.zero, 0.09f, kLineColor, 4);
+            CreateCircleLine(lineRoot.transform, "Center Circle", Vector2.zero, CenterCircleRadius, kLineColor, Scale(0.06f), 48, 0f, 360f);
+            CreateDisc(parent, "Center Spot", Vector2.zero, Scale(0.09f), kLineColor, 4);
 
             BuildGoalSideLines(lineRoot.transform, false);
             BuildGoalSideLines(lineRoot.transform, true);
@@ -281,45 +323,45 @@ namespace BoardBinho
         {
             var direction = isRightSide ? 1f : -1f;
             var sideName = isRightSide ? "Right" : "Left";
-            var fieldX = direction * (FieldHalfWidth - kFieldLineInset);
-            var goalBoxFrontX = fieldX - (direction * kGoalBoxDepth);
-            var penaltyBoxFrontX = fieldX - (direction * kPenaltyBoxDepth);
-            var penaltyMarkX = fieldX - (direction * 1.95f);
-            var goalNetBackX = fieldX + (direction * 0.75f);
+            var fieldX = direction * (PitchHalfWidth - FieldLineInset);
+            var goalBoxFrontX = fieldX - (direction * GoalBoxDepth);
+            var penaltyBoxFrontX = fieldX - (direction * PenaltyBoxDepth);
+            var penaltyMarkX = fieldX - (direction * PenaltyMarkDistance);
+            var goalNetBackX = fieldX - (direction * ScaleX(0.75f));
 
             CreateRectangleLine(
                 parent,
                 sideName + " Goal Box",
-                new Vector2(Mathf.Abs(goalBoxFrontX - fieldX), kGoalBoxHalfHeight * 2f),
+                new Vector2(Mathf.Abs(goalBoxFrontX - fieldX), GoalBoxHalfHeight * 2f),
                 kLineColor,
-                0.06f,
+                Scale(0.06f),
                 new Vector2((goalBoxFrontX + fieldX) * 0.5f, 0f));
 
             CreateRectangleLine(
                 parent,
                 sideName + " Penalty Box",
-                new Vector2(Mathf.Abs(penaltyBoxFrontX - fieldX), kPenaltyBoxHalfHeight * 2f),
+                new Vector2(Mathf.Abs(penaltyBoxFrontX - fieldX), PenaltyBoxHalfHeight * 2f),
                 kLineColor,
-                0.06f,
+                Scale(0.06f),
                 new Vector2((penaltyBoxFrontX + fieldX) * 0.5f, 0f));
 
             CreateRectangleLine(
                 parent,
                 sideName + " Goal Net",
-                new Vector2(Mathf.Abs(goalNetBackX - fieldX), kGoalHalfHeight * 2f),
+                new Vector2(Mathf.Abs(goalNetBackX - fieldX), GoalHalfHeight * 2f),
                 new Color(1f, 1f, 1f, 0.6f),
-                0.045f,
+                Scale(0.045f),
                 new Vector2((goalNetBackX + fieldX) * 0.5f, 0f));
 
-            CreateDisc(parent.parent, sideName + " Penalty Spot", new Vector2(penaltyMarkX, 0f), 0.08f, kLineColor, 4);
+            CreateDisc(parent.parent, sideName + " Penalty Spot", new Vector2(penaltyMarkX, 0f), Scale(0.08f), kLineColor, 4);
 
             if (isRightSide)
             {
-                CreateCircleLine(parent, sideName + " Penalty Arc", new Vector2(penaltyMarkX, 0f), kPenaltyArcRadius, kLineColor, 0.05f, 20, 125f, 235f);
+                CreateCircleLine(parent, sideName + " Penalty Arc", new Vector2(penaltyMarkX, 0f), PenaltyArcRadius, kLineColor, Scale(0.05f), 20, 125f, 235f);
             }
             else
             {
-                CreateCircleLine(parent, sideName + " Penalty Arc", new Vector2(penaltyMarkX, 0f), kPenaltyArcRadius, kLineColor, 0.05f, 20, -55f, 55f);
+                CreateCircleLine(parent, sideName + " Penalty Arc", new Vector2(penaltyMarkX, 0f), PenaltyArcRadius, kLineColor, Scale(0.05f), 20, -55f, 55f);
             }
         }
 
@@ -328,13 +370,15 @@ namespace BoardBinho
             var slotRoot = new GameObject("Defender Slots");
             slotRoot.transform.SetParent(parent, false);
 
+            var fieldX = -(PitchHalfWidth - FieldLineInset);
+            var penaltyBoxFrontX = fieldX + PenaltyBoxDepth;
             var leftSlotPositions = new[]
             {
-                new Vector2(-6.75f, 0.95f),
-                new Vector2(-6.75f, -0.95f),
-                new Vector2(-5.95f, 0f),
-                new Vector2(-4.95f, 1.45f),
-                new Vector2(-4.95f, -1.45f),
+                new Vector2(fieldX + (GoalBoxDepth * 0.6f), GoalBoxHalfHeight - ScaleY(0.16f)),
+                new Vector2(fieldX + (GoalBoxDepth * 0.6f), -GoalBoxHalfHeight + ScaleY(0.16f)),
+                new Vector2(fieldX + (PenaltyBoxDepth * 0.58f), 0f),
+                new Vector2(penaltyBoxFrontX + ScaleX(0.45f), PenaltyBoxHalfHeight - ScaleY(0.3f)),
+                new Vector2(penaltyBoxFrontX + ScaleX(0.45f), -PenaltyBoxHalfHeight + ScaleY(0.3f)),
             };
 
             for (var i = 0; i < leftSlotPositions.Length; i++)
@@ -344,9 +388,22 @@ namespace BoardBinho
             }
         }
 
+        private void ConfigureCamera()
+        {
+            if (m_WorldCamera == null)
+            {
+                return;
+            }
+
+            m_WorldCamera.orthographic = true;
+            m_WorldCamera.orthographicSize = 5.5f;
+            m_WorldCamera.transform.position = new Vector3(0f, 0f, -10f);
+            m_WorldCamera.backgroundColor = new Color(0.05f, 0.08f, 0.06f);
+        }
+
         private void BuildBall(Transform parent)
         {
-            var ballShadow = CreateDisc(parent, "Ball Shadow", new Vector2(0.05f, -0.07f), kBallRadius * 2.25f, kShadowColor, 7);
+            var ballShadow = CreateDisc(parent, "Ball Shadow", new Vector2(ScaleX(0.05f), -ScaleY(0.07f)), BallRadius * 2.25f, kShadowColor, 7);
             ballShadow.transform.localScale = new Vector3(1.15f, 0.7f, 1f);
 
             var ball = new GameObject("Ball");
@@ -357,7 +414,7 @@ namespace BoardBinho
             m_BallRenderer.sprite = m_CircleSprite;
             m_BallRenderer.color = kBallColor;
             m_BallRenderer.sortingOrder = 8;
-            ball.transform.localScale = Vector3.one * (kBallRadius * 2f);
+            ball.transform.localScale = Vector3.one * (BallRadius * 2f);
 
             var ballCollider = ball.AddComponent<CircleCollider2D>();
             ballCollider.radius = 0.5f;
@@ -377,8 +434,8 @@ namespace BoardBinho
             trail.time = 0.28f;
             trail.startColor = new Color(1f, 1f, 1f, 0.35f);
             trail.endColor = new Color(1f, 1f, 1f, 0f);
-            trail.startWidth = 0.16f;
-            trail.endWidth = 0.04f;
+            trail.startWidth = Scale(0.16f);
+            trail.endWidth = Scale(0.04f);
             trail.sortingOrder = 7;
 
             var aim = new GameObject("Aim Line");
@@ -386,8 +443,8 @@ namespace BoardBinho
             m_AimLine = aim.AddComponent<LineRenderer>();
             m_AimLine.material = m_SpriteMaterial;
             m_AimLine.positionCount = 2;
-            m_AimLine.startWidth = 0.07f;
-            m_AimLine.endWidth = 0.02f;
+            m_AimLine.startWidth = Scale(0.07f);
+            m_AimLine.endWidth = Scale(0.02f);
             m_AimLine.startColor = new Color(1f, 1f, 1f, 0.95f);
             m_AimLine.endColor = new Color(1f, 1f, 1f, 0.05f);
             m_AimLine.sortingOrder = 9;
@@ -402,12 +459,12 @@ namespace BoardBinho
             slotRoot.transform.SetParent(parent, false);
             slotRoot.transform.localPosition = new Vector3(position.x, position.y, 0f);
 
-            var fill = CreateDisc(slotRoot.transform, "Slot Fill", Vector2.zero, kDefenderRadius * 2.45f, side == PlayerSide.Left ? new Color(kLeftColor.r, kLeftColor.g, kLeftColor.b, 0.16f) : new Color(kRightColor.r, kRightColor.g, kRightColor.b, 0.16f), 2);
-            var outline = CreateCircleLine(slotRoot.transform, "Slot Outline", Vector2.zero, kDefenderRadius * 1.25f, kLineColor, 0.05f, 28, 0f, 360f);
+            var fill = CreateDisc(slotRoot.transform, "Slot Fill", Vector2.zero, DefenderRadius * 2.45f, side == PlayerSide.Left ? new Color(kLeftColor.r, kLeftColor.g, kLeftColor.b, 0.16f) : new Color(kRightColor.r, kRightColor.g, kRightColor.b, 0.16f), 2);
+            var outline = CreateCircleLine(slotRoot.transform, "Slot Outline", Vector2.zero, DefenderRadius * 1.25f, kLineColor, Scale(0.05f), 28, 0f, 360f);
 
             var defender = new GameObject("Defender");
             defender.transform.SetParent(slotRoot.transform, false);
-            defender.transform.localScale = Vector3.one * (kDefenderRadius * 2f);
+            defender.transform.localScale = Vector3.one * (DefenderRadius * 2f);
 
             var shadow = CreateDisc(defender.transform, "Shadow", new Vector2(0.05f, -0.07f), 1.22f, kShadowColor, 3);
             shadow.transform.localScale = new Vector3(1.1f, 0.72f, 1f);
@@ -510,7 +567,7 @@ namespace BoardBinho
                     }
 
                     var distance = Vector2.Distance(slot.Position, candidate.WorldPosition);
-                    if (distance > kSlotSnapRadius || distance >= bestDistance)
+                    if (distance > SlotSnapRadius || distance >= bestDistance)
                     {
                         continue;
                     }
@@ -571,40 +628,58 @@ namespace BoardBinho
         private void HandleBoardFingerShotInput()
         {
             var fingers = BoardInput.GetActiveContacts(BoardContactType.Finger);
-            var activeContactSeen = false;
+            m_HandledBoardShotThisFrame = fingers.Length > 0;
+            m_ExpiredBoardSwipeContacts.Clear();
 
             for (var i = 0; i < fingers.Length; i++)
             {
                 var contact = fingers[i];
                 var worldPosition = ScreenToWorld(contact.screenPosition);
+                var timestamp = contact.timestamp;
 
-                if (m_ActiveBoardContactId == contact.contactId)
+                if (!m_BoardSwipeContacts.TryGetValue(contact.contactId, out var swipeContact))
                 {
-                    activeContactSeen = true;
-                    m_HandledBoardShotThisFrame = true;
-                    m_CurrentAimWorld = worldPosition;
+                    m_BoardSwipeContacts[contact.contactId] = new SwipeContactState
+                    {
+                        WorldPosition = worldPosition,
+                        Timestamp = timestamp,
+                    };
                     continue;
                 }
 
-                if (m_ActiveBoardContactId >= 0 || !CanStartShotAt(worldPosition))
+                TryLaunchSwipe(
+                    swipeContact.WorldPosition,
+                    worldPosition,
+                    Mathf.Max((float)(timestamp - swipeContact.Timestamp), 1f / 240f));
+
+                m_BoardSwipeContacts[contact.contactId] = new SwipeContactState
                 {
-                    continue;
+                    WorldPosition = worldPosition,
+                    Timestamp = timestamp,
+                };
+            }
+
+            foreach (var contactId in m_BoardSwipeContacts.Keys)
+            {
+                var contactStillActive = false;
+                for (var i = 0; i < fingers.Length; i++)
+                {
+                    if (fingers[i].contactId == contactId)
+                    {
+                        contactStillActive = true;
+                        break;
+                    }
                 }
 
-                if (contact.phase == BoardContactPhase.Began)
+                if (!contactStillActive)
                 {
-                    m_ActiveBoardContactId = contact.contactId;
-                    m_CurrentAimWorld = worldPosition;
-                    m_Phase = MatchPhase.Aiming;
-                    activeContactSeen = true;
-                    m_HandledBoardShotThisFrame = true;
+                    m_ExpiredBoardSwipeContacts.Add(contactId);
                 }
             }
 
-            if (m_ActiveBoardContactId >= 0 && !activeContactSeen)
+            for (var i = 0; i < m_ExpiredBoardSwipeContacts.Count; i++)
             {
-                ReleaseShot(m_CurrentAimWorld);
-                m_ActiveBoardContactId = -1;
+                m_BoardSwipeContacts.Remove(m_ExpiredBoardSwipeContacts[i]);
             }
         }
 
@@ -618,26 +693,46 @@ namespace BoardBinho
 
             var worldPosition = ScreenToWorld(mouse.position.ReadValue(), false);
 
-            if (!m_MouseShotActive && mouse.leftButton.wasPressedThisFrame && CanStartShotAt(worldPosition))
+            if (!m_MouseShotActive)
             {
-                m_MouseShotActive = true;
-                m_CurrentAimWorld = worldPosition;
-                m_Phase = MatchPhase.Aiming;
+                if (mouse.leftButton.wasPressedThisFrame)
+                {
+                    m_MouseShotActive = true;
+                    m_LastMouseWorld = worldPosition;
+                    m_LastMouseSampleTime = Time.unscaledTime;
+                }
+
+                return;
             }
-            else if (m_MouseShotActive && mouse.leftButton.isPressed)
+
+            TryLaunchSwipe(
+                m_LastMouseWorld,
+                worldPosition,
+                Mathf.Max(Time.unscaledTime - m_LastMouseSampleTime, 1f / 240f));
+
+            m_LastMouseWorld = worldPosition;
+            m_LastMouseSampleTime = Time.unscaledTime;
+
+            if (mouse.leftButton.wasReleasedThisFrame)
             {
-                m_CurrentAimWorld = worldPosition;
-            }
-            else if (m_MouseShotActive && mouse.leftButton.wasReleasedThisFrame)
-            {
-                ReleaseShot(worldPosition);
                 m_MouseShotActive = false;
             }
         }
 
-        private bool CanStartShotAt(Vector2 pointerWorldPosition)
+        private void CancelActiveShot()
         {
-            if (m_Phase != MatchPhase.ReadyToShoot && m_Phase != MatchPhase.Aiming)
+            m_BoardSwipeContacts.Clear();
+            m_ExpiredBoardSwipeContacts.Clear();
+            m_MouseShotActive = false;
+            if (m_AimLine != null)
+            {
+                m_AimLine.enabled = false;
+            }
+        }
+
+        private bool CanLaunchSwipe()
+        {
+            if (m_Phase == MatchPhase.Setup || m_Phase == MatchPhase.GoalPause)
             {
                 return false;
             }
@@ -647,33 +742,63 @@ namespace BoardBinho
                 return false;
             }
 
-            if (m_BallBody == null || m_BallBody.linearVelocity.sqrMagnitude > kBallRestVelocity * kBallRestVelocity)
+            if (m_BallBody == null)
             {
                 return false;
             }
 
-            return Vector2.Distance(pointerWorldPosition, m_BallBody.position) <= kBallDragActivationRadius;
+            if (!IsBallSlowEnoughForNextShot())
+            {
+                return false;
+            }
+
+            if (m_Phase == MatchPhase.BallInMotion)
+            {
+                CompleteShotTurn();
+            }
+
+            return m_Phase == MatchPhase.ReadyToShoot;
         }
 
-        private void ReleaseShot(Vector2 worldPosition)
+        private bool TryLaunchSwipe(Vector2 previousWorldPosition, Vector2 currentWorldPosition, float deltaTime)
+        {
+            if (!CanLaunchSwipe())
+            {
+                return false;
+            }
+
+            var swipeVector = currentWorldPosition - previousWorldPosition;
+            var swipeDistance = swipeVector.magnitude;
+            if (swipeDistance < MinSwipeTravelDistance)
+            {
+                return false;
+            }
+
+            if (DistanceFromPointToSegment(m_BallBody.position, previousWorldPosition, currentWorldPosition) > BallSwipeCaptureRadius)
+            {
+                return false;
+            }
+
+            var swipeSpeed = swipeDistance / Mathf.Max(deltaTime, 1f / 240f);
+            if (swipeSpeed < MinSwipeSpeed)
+            {
+                return false;
+            }
+
+            var swipeStrength = Mathf.InverseLerp(MinSwipeSpeed, MaxSwipeSpeed, swipeSpeed);
+            var impulseMagnitude = Mathf.Lerp(MinShotImpulse, MaxShotImpulse, swipeStrength);
+            LaunchShot(swipeVector.normalized * impulseMagnitude);
+            return true;
+        }
+
+        private void LaunchShot(Vector2 impulse)
         {
             if (m_BallBody == null)
             {
                 return;
             }
 
-            var pullVector = m_BallBody.position - worldPosition;
-            var distance = pullVector.magnitude;
-
             CancelActiveShot();
-
-            if (distance < kMinShotDragDistance)
-            {
-                m_Phase = MatchPhase.ReadyToShoot;
-                return;
-            }
-
-            var impulse = Vector2.ClampMagnitude(pullVector, kMaxShotDragDistance) * kShotImpulseScale;
             m_BallBody.linearVelocity = Vector2.zero;
             m_BallBody.angularVelocity = 0f;
             m_BallBody.AddForce(impulse, ForceMode2D.Impulse);
@@ -681,42 +806,48 @@ namespace BoardBinho
             m_BallStillTimer = 0f;
         }
 
-        private void CancelActiveShot()
+        private bool IsBallSlowEnoughForNextShot()
         {
-            m_ActiveBoardContactId = -1;
-            m_MouseShotActive = false;
-            if (m_AimLine != null)
+            return m_BallBody != null && m_BallBody.linearVelocity.sqrMagnitude <= BallRestVelocity * BallRestVelocity;
+        }
+
+        private void CompleteShotTurn()
+        {
+            if (m_BallBody == null)
             {
-                m_AimLine.enabled = false;
+                return;
             }
+
+            StopBall();
+            m_BallStillTimer = 0f;
+            m_CurrentTurn = m_CurrentTurn == PlayerSide.Left ? PlayerSide.Right : PlayerSide.Left;
+            m_Phase = MatchPhase.ReadyToShoot;
         }
 
         private void UpdateAimLine()
         {
-            if (m_AimLine == null || m_BallBody == null)
+            if (m_AimLine == null)
             {
                 return;
             }
 
-            var isAiming = m_ActiveBoardContactId >= 0 || m_MouseShotActive;
-            m_AimLine.enabled = isAiming;
-            if (!isAiming)
-            {
-                return;
-            }
-
-            m_AimLine.SetPosition(0, m_BallBody.position);
-            m_AimLine.SetPosition(1, Vector2.Lerp(m_BallBody.position, m_CurrentAimWorld, 0.92f));
+            m_AimLine.enabled = false;
         }
 
         private void UpdateBallMotionState()
         {
-            if (m_BallBody == null || m_Phase == MatchPhase.Setup || m_Phase == MatchPhase.Aiming)
+            if (m_BallBody == null || m_Phase == MatchPhase.Setup || m_Phase == MatchPhase.GoalPause)
             {
                 return;
             }
 
-            if (m_BallBody.linearVelocity.magnitude <= kBallRestVelocity)
+            if (m_Phase != MatchPhase.BallInMotion)
+            {
+                m_BallStillTimer = 0f;
+                return;
+            }
+
+            if (IsBallSlowEnoughForNextShot())
             {
                 m_BallStillTimer += Time.fixedDeltaTime;
             }
@@ -727,9 +858,7 @@ namespace BoardBinho
 
             if (m_Phase == MatchPhase.BallInMotion && m_BallStillTimer >= kBallRestTime)
             {
-                StopBall();
-                m_CurrentTurn = m_CurrentTurn == PlayerSide.Left ? PlayerSide.Right : PlayerSide.Left;
-                m_Phase = MatchPhase.ReadyToShoot;
+                CompleteShotTurn();
             }
         }
 
@@ -741,16 +870,16 @@ namespace BoardBinho
             }
 
             var position = m_BallBody.position;
-            if (Mathf.Abs(position.y) > kGoalHalfHeight - 0.05f)
+            if (Mathf.Abs(position.y) > GoalHalfHeight - ScaleY(0.05f))
             {
                 return;
             }
 
-            if (position.x <= -FieldHalfWidth - 0.16f)
+            if (position.x <= -PitchHalfWidth - GoalScoreDepth)
             {
                 RegisterGoal(PlayerSide.Right);
             }
-            else if (position.x >= FieldHalfWidth + 0.16f)
+            else if (position.x >= PitchHalfWidth + GoalScoreDepth)
             {
                 RegisterGoal(PlayerSide.Left);
             }
@@ -806,16 +935,31 @@ namespace BoardBinho
                 case MatchPhase.Setup:
                     return "Place 5 robot defenders on each half: 2 in front of the goal box, 1 in the middle of the penalty box, and 2 just outside the penalty box.";
                 case MatchPhase.ReadyToShoot:
-                    return GetTurnLabel() + " to shoot. Touch the ball, pull back, and release to flick.";
+                    return GetTurnLabel() + " to shoot. Swipe across the ball in the direction you want it to travel; faster swipes hit harder.";
                 case MatchPhase.Aiming:
-                    return GetTurnLabel() + " is lining up a shot.";
+                    return GetTurnLabel() + " is lining up the next flick.";
                 case MatchPhase.BallInMotion:
-                    return "Ball in play. Turn changes when it settles.";
+                    return "Ball in play. The next player can flick as soon as it settles.";
                 case MatchPhase.GoalPause:
                     return (m_LastScoringSide == PlayerSide.Left ? "Blue" : "Orange") + " scores!";
                 default:
                     return string.Empty;
             }
+        }
+
+        private static float DistanceFromPointToSegment(Vector2 point, Vector2 segmentStart, Vector2 segmentEnd)
+        {
+            var segment = segmentEnd - segmentStart;
+            var segmentLengthSquared = segment.sqrMagnitude;
+            if (segmentLengthSquared <= Mathf.Epsilon)
+            {
+                return Vector2.Distance(point, segmentStart);
+            }
+
+            var projection = Vector2.Dot(point - segmentStart, segment) / segmentLengthSquared;
+            projection = Mathf.Clamp01(projection);
+            var closestPoint = segmentStart + (segment * projection);
+            return Vector2.Distance(point, closestPoint);
         }
 
         private string GetTurnLabel()
@@ -856,7 +1000,6 @@ namespace BoardBinho
 
         private void CreateWall(Transform parent, string name, Vector2 position, Vector2 size)
         {
-            CreateQuad(parent, name + " Visual", position, size, kRailColor, -0.05f, -2);
             var wall = new GameObject(name);
             wall.transform.SetParent(parent, false);
             wall.transform.localPosition = new Vector3(position.x, position.y, 0f);
@@ -989,6 +1132,12 @@ namespace BoardBinho
         {
             public int ContactId;
             public Vector2 WorldPosition;
+        }
+
+        private struct SwipeContactState
+        {
+            public Vector2 WorldPosition;
+            public double Timestamp;
         }
     }
 }

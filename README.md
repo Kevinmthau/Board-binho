@@ -20,3 +20,18 @@ The project recreates the field from a top-down view and uses Board piece detect
 ## Build for Board
 
 Use the editor menu item `Binho > Build Android APK` or the command-line build entry point in `Assets/Editor/BinhoBuild.cs`.
+
+For terminal builds, prefer the wrapper script:
+
+```bash
+./scripts/unity_build_android.sh
+./scripts/unity_build_android.sh --install
+```
+
+Why use the wrapper:
+
+- prevents overlapping headless Unity builds for this repo
+- can clear stale Unity/licensing processes with `--clean-stale`
+- prints a clearer diagnosis when Unity fails before the actual build starts
+
+If you are running this from Codex or another sandboxed tool, the Unity batch build must run with full system access. Otherwise Unity may fail early with `attempt to write a readonly database` before licensing finishes initializing.

@@ -78,6 +78,12 @@ bdb logs com.defaultcompany.boardbinho
 bdb stop com.defaultcompany.boardbinho
 ```
 
+## Default completion behavior
+
+- After making code or content changes for this repo, finish by building the Android APK and installing it to Board hardware with the repo build helper unless the user explicitly asks not to, or the task is review-only / analysis-only.
+- Preferred command: `./scripts/unity_build_android.sh --install`
+- If Unity licensing or stale headless editor processes block the build, retry with `./scripts/unity_build_android.sh --clean-stale --install`
+
 ## Debug order
 
 1. Verify Board project setup
