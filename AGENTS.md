@@ -1,0 +1,89 @@
+# AGENTS.md
+
+This repository targets **Board Binho**, a tabletop game platform project built on **Unity + Android** with the **Board Unity SDK**.
+
+## What to assume
+
+- This project uses the **Board Unity SDK**
+- Treat this as a **Unity Android** project, not a desktop Unity project
+- Prefer Board SDK APIs and patterns whenever Board functionality exists
+- Use the Board docs root: `https://docs.dev.board.fun`
+
+## Non-negotiable Board setup rules
+
+Verify these before deeper debugging:
+
+- **Unity**: `2022.3 LTS` or later. Unity 6 is supported.
+- **Platform**: `Android`
+- **Minimum API Level**: `Android 13 / API 33`
+- **Target API Level**: `Android 13 / API 33`
+- **Scripting Backend**: `IL2CPP`
+- **Architecture**: `ARM64`
+- **Input System**: Unity Input System `1.7.0+` enabled
+- **Orientation**: `Landscape Left` only
+- **Unity 6 Entry Point**: `Activity`, not `Game Activity`
+
+## First thing to do in a fresh Board project
+
+1. Run `Board > Configure Unity Project...`
+2. Click `Apply Selected Settings`
+3. Restart the editor if prompted by Input System changes
+4. Open `Edit > Project Settings > Board > Input Settings`
+5. Click `Load Available Models`
+6. Select and download the correct piece-set model
+
+## Required namespaces
+
+Use:
+
+```csharp
+using Board.Core;
+using Board.Input;
+using Board.Session;
+using Board.Save;
+```
+
+Do not use:
+
+```csharp
+using Board;
+```
+
+## Core Board rules
+
+- Read contacts from `BoardInput.GetActiveContacts(...)`
+- Track live piece instances by `contactId`, not `glyphId`
+- Treat `glyphId` as a piece type identifier, not a unique instance id
+- Use `BoardUIInputModule` for runtime UI interaction on Board hardware
+- Use `BoardSession` for player/session flows
+- Use `BoardSaveGameManager` for save integration
+- Use `BoardApplication` for pause flow integration
+- Set `Application.targetFrameRate = 60` unless there is a documented reason not to
+
+## Repo-specific placeholders
+
+- Android package id: `com.defaultcompany.boardbinho`
+- App bundle id for launch examples: `com.defaultcompany.boardbinho`
+- Unity build helper: `Assets/Editor/BinhoBuild.cs`
+- Output APK path: `Builds/Android/BoardBinho.apk`
+- Current piece model: `thrasos_arcade_v1.0.2.tflite`
+
+## Build and deploy loop
+
+```bash
+bdb status
+bdb install Builds/Android/BoardBinho.apk
+bdb launch com.defaultcompany.boardbinho
+bdb logs com.defaultcompany.boardbinho
+bdb stop com.defaultcompany.boardbinho
+```
+
+## Debug order
+
+1. Verify Board project setup
+2. Verify the correct piece model is installed and selected
+3. Verify `BoardUIInputModule` if UI is involved
+4. Reproduce in the simulator
+5. Reproduce on hardware
+6. Compare behavior to the Board sample scene
+7. Only then conclude the bug is in gameplay code
