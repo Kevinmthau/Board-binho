@@ -13,6 +13,8 @@ namespace BoardBinho
         private const float kFieldWidth = 16f;
         private const float kFieldHeight = 9f;
         private const float kFieldScreenFill = 0.94f;
+        private const string kFieldBackgroundResourcePath = "Binho/field_background";
+        private const float kFieldBackgroundPixelsPerUnit = 100f;
         private const float kOffBoardGoalClearance = 0.22f;
         private const float kFieldLineInset = 0.08f;
         private const float kWallThickness = 0.22f;
@@ -59,6 +61,7 @@ namespace BoardBinho
         private Material m_SpriteMaterial;
         private Sprite m_SquareSprite;
         private Sprite m_CircleSprite;
+        private Sprite m_FieldBackgroundSprite;
         private PhysicsMaterial2D m_BouncyMaterial;
 
         private Rigidbody2D m_BallBody;
@@ -247,6 +250,19 @@ namespace BoardBinho
                 m_CircleSprite = Sprite.Create(texture, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f), size);
             }
 
+            if (m_FieldBackgroundSprite == null)
+            {
+                var fieldTexture = LoadFieldBackgroundTexture();
+                if (fieldTexture != null)
+                {
+                    m_FieldBackgroundSprite = Sprite.Create(
+                        fieldTexture,
+                        new Rect(0f, 0f, fieldTexture.width, fieldTexture.height),
+                        new Vector2(0.5f, 0.5f),
+                        kFieldBackgroundPixelsPerUnit);
+                }
+            }
+
             if (m_BouncyMaterial == null)
             {
                 m_BouncyMaterial = new PhysicsMaterial2D("BinhoBounce")
@@ -257,6 +273,18 @@ namespace BoardBinho
             }
         }
 
+        private static Texture2D LoadFieldBackgroundTexture()
+        {
+            var fieldTexture = Resources.Load<Texture2D>(kFieldBackgroundResourcePath);
+            if (fieldTexture != null)
+            {
+                return fieldTexture;
+            }
+
+            var fieldSprites = Resources.LoadAll<Sprite>(kFieldBackgroundResourcePath);
+            return fieldSprites.Length > 0 ? fieldSprites[0].texture : null;
+        }
+
         private void BuildPlayfield()
         {
             var fieldRoot = new GameObject("Binho Field");
@@ -265,12 +293,25 @@ namespace BoardBinho
             ConfigureCamera();
 
             var boardSurfaceSize = new Vector2(PitchHalfWidth * 2f, PitchHalfHeight * 2f);
-            CreateQuad(fieldRoot.transform, "Field Edge", Vector2.zero, boardSurfaceSize + (Vector2.one * Scale(0.22f)), kFieldEdgeColor, -0.12f, -5);
-            CreateQuad(fieldRoot.transform, "Field Surface", Vector2.zero, boardSurfaceSize, kFieldColor, -0.1f, -4);
-            CreateQuad(fieldRoot.transform, "Field Wash", Vector2.zero, boardSurfaceSize, new Color(kFieldInnerTint.r, kFieldInnerTint.g, kFieldInnerTint.b, 0.48f), -0.09f, -3);
+            var hasFieldBackground = m_FieldBackgroundSprite != null;
+            if (hasFieldBackground)
+            {
+                var screenSurfaceSize = new Vector2(ScreenHalfWidth * 2f, ScreenHalfHeight * 2f);
+                CreateSpriteQuad(fieldRoot.transform, "Field Background", Vector2.zero, screenSurfaceSize, m_FieldBackgroundSprite, Color.white, -0.13f, -6);
+            }
+            else
+            {
+                CreateQuad(fieldRoot.transform, "Field Edge", Vector2.zero, boardSurfaceSize + (Vector2.one * Scale(0.22f)), kFieldEdgeColor, -0.12f, -5);
+                CreateQuad(fieldRoot.transform, "Field Surface", Vector2.zero, boardSurfaceSize, kFieldColor, -0.1f, -4);
+                CreateQuad(fieldRoot.transform, "Field Wash", Vector2.zero, boardSurfaceSize, new Color(kFieldInnerTint.r, kFieldInnerTint.g, kFieldInnerTint.b, 0.48f), -0.09f, -3);
+            }
 
             BuildWalls(fieldRoot.transform);
-            BuildFieldLines(fieldRoot.transform);
+            if (!hasFieldBackground)
+            {
+                BuildFieldLines(fieldRoot.transform);
+            }
+
             BuildSlots(fieldRoot.transform);
             BuildBall(fieldRoot.transform);
         }
@@ -1066,15 +1107,25 @@ namespace BoardBinho
 
         private GameObject CreateQuad(Transform parent, string name, Vector2 position, Vector2 size, Color color, float z, int sortingOrder)
         {
+            return CreateSpriteQuad(parent, name, position, size, m_SquareSprite, color, z, sortingOrder);
+        }
+
+        private GameObject CreateSpriteQuad(Transform parent, string name, Vector2 position, Vector2 size, Sprite sprite, Color color, float z, int sortingOrder)
+        {
             var quad = new GameObject(name);
             quad.transform.SetParent(parent, false);
             quad.transform.localPosition = new Vector3(position.x, position.y, z);
-            quad.transform.localScale = new Vector3(size.x, size.y, 1f);
 
             var renderer = quad.AddComponent<SpriteRenderer>();
-            renderer.sprite = m_SquareSprite;
+            renderer.sprite = sprite;
             renderer.color = color;
             renderer.sortingOrder = sortingOrder;
+
+            var spriteSize = sprite != null ? sprite.bounds.size : Vector3.one;
+            quad.transform.localScale = new Vector3(
+                spriteSize.x > Mathf.Epsilon ? size.x / spriteSize.x : size.x,
+                spriteSize.y > Mathf.Epsilon ? size.y / spriteSize.y : size.y,
+                1f);
 
             return quad;
         }
