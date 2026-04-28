@@ -891,11 +891,7 @@ namespace BoardBinho
                 return false;
             }
 
-            if (m_Phase == MatchPhase.BallInMotion)
-            {
-                CompleteShotTurn();
-            }
-
+            TryCompleteShotTurnIfSettled();
             return m_Phase == MatchPhase.ReadyToShoot;
         }
 
