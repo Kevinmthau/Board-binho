@@ -11,7 +11,6 @@ readonly BUILD_METHOD="BoardBinho.EditorTools.BinhoBuild.BuildAndroidApkFromComm
 readonly BUILD_LOG="${TMPDIR:-/tmp}/board-binho-build.log"
 readonly LOCK_DIR="${TMPDIR:-/tmp}/board-binho-unity-build.lock"
 readonly APK_PATH="${PROJECT_ROOT}/Builds/Android/BoardBinho.apk"
-readonly DEFAULT_BDB="/Users/kevinthau/Board-demo/Tools/bdb"
 
 install_after_build=false
 clean_stale=false
@@ -130,8 +129,11 @@ run_build() {
 }
 
 install_apk() {
-    local bdb_bin="${BDB_BIN:-$DEFAULT_BDB}"
-    [[ -x "$bdb_bin" ]] || fail "bdb not found at $bdb_bin"
+    local bdb_bin
+    if ! bdb_bin="$(resolve_bdb_bin)"; then
+        fail "bdb not found. Set BDB_BIN=/path/to/bdb or add bdb to PATH."
+    fi
+
     [[ -f "$APK_PATH" ]] || fail "APK not found at $APK_PATH"
 
     log "Checking Board connection."
@@ -139,6 +141,30 @@ install_apk() {
 
     log "Installing APK: $APK_PATH"
     "$bdb_bin" install "$APK_PATH"
+}
+
+resolve_bdb_bin() {
+    if [[ -n "${BDB_BIN:-}" ]]; then
+        [[ -x "$BDB_BIN" ]] && printf '%s\n' "$BDB_BIN" && return 0
+        return 1
+    fi
+
+    local path_bdb
+    path_bdb="$(command -v bdb 2>/dev/null || true)"
+    if [[ -n "$path_bdb" && -x "$path_bdb" ]]; then
+        printf '%s\n' "$path_bdb"
+        return 0
+    fi
+
+    local candidate
+    for candidate in "$PROJECT_ROOT/Tools/bdb" "$HOME/Desktop/bdb" "$HOME/Documents/bdb" "/Users/kevinthau/Board-demo/Tools/bdb"; do
+        if [[ -x "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
 }
 
 while [[ $# -gt 0 ]]; do
