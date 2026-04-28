@@ -12,17 +12,20 @@ namespace BoardBinho
     {
         private const float kFieldWidth = 16f;
         private const float kFieldHeight = 9f;
-        private const float kFieldLineInset = 0.03f;
+        private const float kFieldScreenFill = 0.94f;
+        private const float kOffBoardGoalClearance = 0.22f;
+        private const float kFieldLineInset = 0.08f;
         private const float kWallThickness = 0.22f;
         private const float kGoalDepth = 0.9f;
-        private const float kGoalHalfHeight = 0.95f;
-        private const float kGoalBoxDepth = 1.65f;
-        private const float kGoalBoxHalfHeight = 1.2f;
-        private const float kPenaltyBoxDepth = 3.45f;
-        private const float kPenaltyBoxHalfHeight = 2.45f;
-        private const float kCenterCircleRadius = 1.3f;
-        private const float kPenaltyArcRadius = 0.85f;
-        private const float kPenaltyMarkDistance = 2.2f;
+        private const float kGoalHalfHeight = 0.86f;
+        private const float kGoalBoxDepth = 1.22f;
+        private const float kGoalBoxHalfHeight = 0.98f;
+        private const float kPenaltyBoxDepth = 2.7f;
+        private const float kPenaltyBoxHalfHeight = 1.82f;
+        private const float kCenterCircleRadius = 1.35f;
+        private const float kPenaltyArcRadius = 0.58f;
+        private const float kPenaltyMarkDistance = 1.88f;
+        private const float kCornerArcRadius = 0.34f;
         private const float kDefenderRadius = 0.32f;
         private const float kSlotSnapRadius = 0.95f;
         private const float kBallRadius = 0.2f;
@@ -38,6 +41,8 @@ namespace BoardBinho
 
         private static readonly Color kFieldColor = new Color(0.09f, 0.35f, 0.18f);
         private static readonly Color kFieldInnerTint = new Color(0.13f, 0.42f, 0.23f);
+        private static readonly Color kFieldEdgeColor = new Color(0.04f, 0.18f, 0.08f);
+        private static readonly Color kBackgroundColor = new Color(0.9f, 0.93f, 0.91f);
         private static readonly Color kLineColor = new Color(0.96f, 0.96f, 0.94f);
         private static readonly Color kLeftColor = new Color(0.22f, 0.73f, 0.98f);
         private static readonly Color kRightColor = new Color(0.98f, 0.66f, 0.18f);
@@ -72,11 +77,12 @@ namespace BoardBinho
         private float BaseFieldHalfHeight => kFieldHeight * 0.5f;
         private float ScreenHalfWidth => m_WorldCamera != null && m_WorldCamera.orthographic ? m_WorldCamera.orthographicSize * m_WorldCamera.aspect : BaseFieldHalfWidth;
         private float ScreenHalfHeight => m_WorldCamera != null && m_WorldCamera.orthographic ? m_WorldCamera.orthographicSize : BaseFieldHalfHeight;
-        private float PitchHalfWidth => ScreenHalfWidth;
-        private float PitchHalfHeight => ScreenHalfHeight;
-        private float HorizontalFieldScale => PitchHalfWidth / BaseFieldHalfWidth;
-        private float VerticalFieldScale => PitchHalfHeight / BaseFieldHalfHeight;
-        private float UniformFieldScale => Mathf.Min(HorizontalFieldScale, VerticalFieldScale);
+        private float GoalDisplayHalfWidth => BaseFieldHalfWidth + kGoalDepth + kWallThickness + kOffBoardGoalClearance;
+        private float UniformFieldScale => Mathf.Min(ScreenHalfWidth / GoalDisplayHalfWidth, ScreenHalfHeight / BaseFieldHalfHeight) * kFieldScreenFill;
+        private float PitchHalfWidth => BaseFieldHalfWidth * UniformFieldScale;
+        private float PitchHalfHeight => BaseFieldHalfHeight * UniformFieldScale;
+        private float HorizontalFieldScale => UniformFieldScale;
+        private float VerticalFieldScale => UniformFieldScale;
         private float FieldLineInset => Scale(kFieldLineInset);
         private float WallThickness => Scale(kWallThickness);
         private float GoalDepth => ScaleX(kGoalDepth);
@@ -88,6 +94,7 @@ namespace BoardBinho
         private float CenterCircleRadius => Scale(kCenterCircleRadius);
         private float PenaltyArcRadius => Scale(kPenaltyArcRadius);
         private float PenaltyMarkDistance => ScaleX(kPenaltyMarkDistance);
+        private float CornerArcRadius => Scale(kCornerArcRadius);
         private float DefenderRadius => Scale(kDefenderRadius);
         private float SlotSnapRadius => Scale(kSlotSnapRadius);
         private float BallRadius => Scale(kBallRadius);
@@ -257,7 +264,8 @@ namespace BoardBinho
 
             ConfigureCamera();
 
-            var boardSurfaceSize = new Vector2(ScreenHalfWidth * 2f, ScreenHalfHeight * 2f);
+            var boardSurfaceSize = new Vector2(PitchHalfWidth * 2f, PitchHalfHeight * 2f);
+            CreateQuad(fieldRoot.transform, "Field Edge", Vector2.zero, boardSurfaceSize + (Vector2.one * Scale(0.22f)), kFieldEdgeColor, -0.12f, -5);
             CreateQuad(fieldRoot.transform, "Field Surface", Vector2.zero, boardSurfaceSize, kFieldColor, -0.1f, -4);
             CreateQuad(fieldRoot.transform, "Field Wash", Vector2.zero, boardSurfaceSize, new Color(kFieldInnerTint.r, kFieldInnerTint.g, kFieldInnerTint.b, 0.48f), -0.09f, -3);
 
@@ -296,6 +304,8 @@ namespace BoardBinho
             var lineRoot = new GameObject("Field Lines");
             lineRoot.transform.SetParent(parent, false);
 
+            BuildBoundaryLines(lineRoot.transform);
+
             CreateLine(lineRoot.transform, "Halfway", kLineColor, Scale(0.06f), new[]
             {
                 new Vector3(0f, -PitchHalfHeight + FieldLineInset, 0f),
@@ -309,6 +319,53 @@ namespace BoardBinho
             BuildGoalSideLines(lineRoot.transform, true);
         }
 
+        private void BuildBoundaryLines(Transform parent)
+        {
+            var leftX = -PitchHalfWidth + FieldLineInset;
+            var rightX = PitchHalfWidth - FieldLineInset;
+            var topY = PitchHalfHeight - FieldLineInset;
+            var bottomY = -PitchHalfHeight + FieldLineInset;
+            var goalLineGap = GoalBoxHalfHeight;
+            var lineWidth = Scale(0.06f);
+
+            CreateLine(parent, "Top Sideline", kLineColor, lineWidth, new[]
+            {
+                new Vector3(leftX + CornerArcRadius, topY, 0f),
+                new Vector3(rightX - CornerArcRadius, topY, 0f),
+            });
+            CreateLine(parent, "Bottom Sideline", kLineColor, lineWidth, new[]
+            {
+                new Vector3(leftX + CornerArcRadius, bottomY, 0f),
+                new Vector3(rightX - CornerArcRadius, bottomY, 0f),
+            });
+
+            CreateLine(parent, "Left Goal Line Upper", kLineColor, lineWidth, new[]
+            {
+                new Vector3(leftX, goalLineGap, 0f),
+                new Vector3(leftX, topY - CornerArcRadius, 0f),
+            });
+            CreateLine(parent, "Left Goal Line Lower", kLineColor, lineWidth, new[]
+            {
+                new Vector3(leftX, bottomY + CornerArcRadius, 0f),
+                new Vector3(leftX, -goalLineGap, 0f),
+            });
+            CreateLine(parent, "Right Goal Line Upper", kLineColor, lineWidth, new[]
+            {
+                new Vector3(rightX, goalLineGap, 0f),
+                new Vector3(rightX, topY - CornerArcRadius, 0f),
+            });
+            CreateLine(parent, "Right Goal Line Lower", kLineColor, lineWidth, new[]
+            {
+                new Vector3(rightX, bottomY + CornerArcRadius, 0f),
+                new Vector3(rightX, -goalLineGap, 0f),
+            });
+
+            CreateCircleLine(parent, "Top Left Corner", new Vector2(leftX + CornerArcRadius, topY - CornerArcRadius), CornerArcRadius, kLineColor, lineWidth, 10, 90f, 180f);
+            CreateCircleLine(parent, "Bottom Left Corner", new Vector2(leftX + CornerArcRadius, bottomY + CornerArcRadius), CornerArcRadius, kLineColor, lineWidth, 10, 180f, 270f);
+            CreateCircleLine(parent, "Top Right Corner", new Vector2(rightX - CornerArcRadius, topY - CornerArcRadius), CornerArcRadius, kLineColor, lineWidth, 10, 0f, 90f);
+            CreateCircleLine(parent, "Bottom Right Corner", new Vector2(rightX - CornerArcRadius, bottomY + CornerArcRadius), CornerArcRadius, kLineColor, lineWidth, 10, 270f, 360f);
+        }
+
         private void BuildGoalSideLines(Transform parent, bool isRightSide)
         {
             var direction = isRightSide ? 1f : -1f;
@@ -317,31 +374,26 @@ namespace BoardBinho
             var goalBoxFrontX = fieldX - (direction * GoalBoxDepth);
             var penaltyBoxFrontX = fieldX - (direction * PenaltyBoxDepth);
             var penaltyMarkX = fieldX - (direction * PenaltyMarkDistance);
-            var goalNetBackX = fieldX - (direction * ScaleX(0.75f));
 
-            CreateRectangleLine(
+            CreateOpenGoalAreaLine(
                 parent,
                 sideName + " Goal Box",
-                new Vector2(Mathf.Abs(goalBoxFrontX - fieldX), GoalBoxHalfHeight * 2f),
+                fieldX,
+                goalBoxFrontX,
+                GoalBoxHalfHeight,
                 kLineColor,
-                Scale(0.06f),
-                new Vector2((goalBoxFrontX + fieldX) * 0.5f, 0f));
+                Scale(0.06f));
 
-            CreateRectangleLine(
+            CreateOpenGoalAreaLine(
                 parent,
                 sideName + " Penalty Box",
-                new Vector2(Mathf.Abs(penaltyBoxFrontX - fieldX), PenaltyBoxHalfHeight * 2f),
+                fieldX,
+                penaltyBoxFrontX,
+                PenaltyBoxHalfHeight,
                 kLineColor,
-                Scale(0.06f),
-                new Vector2((penaltyBoxFrontX + fieldX) * 0.5f, 0f));
+                Scale(0.06f));
 
-            CreateRectangleLine(
-                parent,
-                sideName + " Goal Net",
-                new Vector2(Mathf.Abs(goalNetBackX - fieldX), GoalHalfHeight * 2f),
-                new Color(1f, 1f, 1f, 0.6f),
-                Scale(0.045f),
-                new Vector2((goalNetBackX + fieldX) * 0.5f, 0f));
+            BuildOffBoardGoalLines(parent, sideName, direction, fieldX);
 
             CreateDisc(parent.parent, sideName + " Penalty Spot", new Vector2(penaltyMarkX, 0f), Scale(0.08f), kLineColor, 4);
 
@@ -352,6 +404,55 @@ namespace BoardBinho
             else
             {
                 CreateCircleLine(parent, sideName + " Penalty Arc", new Vector2(penaltyMarkX, 0f), PenaltyArcRadius, kLineColor, Scale(0.05f), 20, -55f, 55f);
+            }
+        }
+
+        private void CreateOpenGoalAreaLine(Transform parent, string name, float goalLineX, float frontX, float halfHeight, Color color, float width)
+        {
+            CreateLine(parent, name, color, width, new[]
+            {
+                new Vector3(goalLineX, halfHeight, 0f),
+                new Vector3(frontX, halfHeight, 0f),
+                new Vector3(frontX, -halfHeight, 0f),
+                new Vector3(goalLineX, -halfHeight, 0f),
+            });
+        }
+
+        private void BuildOffBoardGoalLines(Transform parent, string sideName, float direction, float fieldX)
+        {
+            var backX = direction * (PitchHalfWidth + GoalDepth);
+            var frameColor = new Color(kLineColor.r, kLineColor.g, kLineColor.b, 0.96f);
+            var netColor = new Color(kLineColor.r, kLineColor.g, kLineColor.b, 0.42f);
+            var frameWidth = Scale(0.08f);
+            var netWidth = Scale(0.035f);
+
+            CreateLine(parent, sideName + " Off Board Goal Frame", frameColor, frameWidth, new[]
+            {
+                new Vector3(fieldX, GoalHalfHeight, 0f),
+                new Vector3(backX, GoalHalfHeight, 0f),
+                new Vector3(backX, -GoalHalfHeight, 0f),
+                new Vector3(fieldX, -GoalHalfHeight, 0f),
+            });
+
+            for (var i = 1; i <= 3; i++)
+            {
+                var t = i * 0.25f;
+                var x = Mathf.Lerp(fieldX, backX, t);
+                CreateLine(parent, sideName + " Goal Net Rib " + i, netColor, netWidth, new[]
+                {
+                    new Vector3(x, GoalHalfHeight, 0f),
+                    new Vector3(x, -GoalHalfHeight, 0f),
+                });
+            }
+
+            for (var i = 1; i <= 2; i++)
+            {
+                var y = Mathf.Lerp(-GoalHalfHeight, GoalHalfHeight, i / 3f);
+                CreateLine(parent, sideName + " Goal Net Strand " + i, netColor, netWidth, new[]
+                {
+                    new Vector3(fieldX, y, 0f),
+                    new Vector3(backX, y, 0f),
+                });
             }
         }
 
@@ -388,7 +489,7 @@ namespace BoardBinho
             m_WorldCamera.orthographic = true;
             m_WorldCamera.orthographicSize = 5.5f;
             m_WorldCamera.transform.position = new Vector3(0f, 0f, -10f);
-            m_WorldCamera.backgroundColor = new Color(0.05f, 0.08f, 0.06f);
+            m_WorldCamera.backgroundColor = kBackgroundColor;
         }
 
         private void BuildBall(Transform parent)
@@ -991,25 +1092,6 @@ namespace BoardBinho
             renderer.sortingOrder = sortingOrder;
 
             return disc;
-        }
-
-        private void CreateRectangleLine(Transform parent, string name, Vector2 size, Color color, float width)
-        {
-            CreateRectangleLine(parent, name, size, color, width, Vector2.zero);
-        }
-
-        private void CreateRectangleLine(Transform parent, string name, Vector2 size, Color color, float width, Vector2 center)
-        {
-            var halfWidth = size.x * 0.5f;
-            var halfHeight = size.y * 0.5f;
-            CreateLine(parent, name, color, width, new[]
-            {
-                new Vector3(center.x - halfWidth, center.y - halfHeight, 0f),
-                new Vector3(center.x - halfWidth, center.y + halfHeight, 0f),
-                new Vector3(center.x + halfWidth, center.y + halfHeight, 0f),
-                new Vector3(center.x + halfWidth, center.y - halfHeight, 0f),
-                new Vector3(center.x - halfWidth, center.y - halfHeight, 0f),
-            });
         }
 
         private LineRenderer CreateCircleLine(Transform parent, string name, Vector2 center, float radius, Color color, float width, int segments, float startDegrees, float endDegrees)
