@@ -59,7 +59,6 @@ namespace BoardBinho
         private readonly List<DefenderSlot> m_RightSlots = new List<DefenderSlot>();
         private readonly List<DefenderSlot> m_AllSlots = new List<DefenderSlot>();
         private readonly Dictionary<int, SwipeContactState> m_BoardSwipeContacts = new Dictionary<int, SwipeContactState>();
-        private readonly HashSet<int> m_ConsumedBoardSwipeContacts = new HashSet<int>();
         private readonly List<int> m_ExpiredBoardSwipeContacts = new List<int>();
 
         private Material m_SpriteMaterial;
@@ -783,31 +782,29 @@ namespace BoardBinho
                     contact.phase == BoardContactPhase.Canceled)
                 {
                     m_BoardSwipeContacts.Remove(contact.contactId);
-                    m_ConsumedBoardSwipeContacts.Remove(contact.contactId);
-                    continue;
-                }
-
-                if (m_ConsumedBoardSwipeContacts.Contains(contact.contactId))
-                {
                     continue;
                 }
 
                 var worldPosition = ScreenToWorld(contact.screenPosition);
                 var timestamp = contact.timestamp;
 
-                if (!m_BoardSwipeContacts.TryGetValue(contact.contactId, out var swipeContact))
+                if (!m_BoardSwipeContacts.TryGetValue(contact.contactId, out var swipeContact) ||
+                    contact.phase == BoardContactPhase.Began)
                 {
-                    if (contact.phase != BoardContactPhase.Began || !CanLaunchSwipe())
-                    {
-                        m_ConsumedBoardSwipeContacts.Add(contact.contactId);
-                        continue;
-                    }
-
                     m_BoardSwipeContacts[contact.contactId] = new SwipeContactState
                     {
                         LastWorldPosition = worldPosition,
                         LastTimestamp = timestamp,
+                        HasLaunched = false,
                     };
+                    continue;
+                }
+
+                if (swipeContact.HasLaunched || !CanLaunchSwipe())
+                {
+                    swipeContact.LastWorldPosition = worldPosition;
+                    swipeContact.LastTimestamp = timestamp;
+                    m_BoardSwipeContacts[contact.contactId] = swipeContact;
                     continue;
                 }
 
@@ -816,7 +813,10 @@ namespace BoardBinho
                     worldPosition,
                     Mathf.Max((float)(timestamp - swipeContact.LastTimestamp), 1f / 240f)))
                 {
-                    m_ConsumedBoardSwipeContacts.Add(contact.contactId);
+                    swipeContact.HasLaunched = true;
+                    swipeContact.LastWorldPosition = worldPosition;
+                    swipeContact.LastTimestamp = timestamp;
+                    m_BoardSwipeContacts[contact.contactId] = swipeContact;
                     return;
                 }
 
@@ -844,19 +844,6 @@ namespace BoardBinho
                 m_BoardSwipeContacts.Remove(m_ExpiredBoardSwipeContacts[i]);
             }
 
-            m_ExpiredBoardSwipeContacts.Clear();
-            foreach (var contactId in m_ConsumedBoardSwipeContacts)
-            {
-                if (!ContainsInProgressContact(fingers, contactId))
-                {
-                    m_ExpiredBoardSwipeContacts.Add(contactId);
-                }
-            }
-
-            for (var i = 0; i < m_ExpiredBoardSwipeContacts.Count; i++)
-            {
-                m_ConsumedBoardSwipeContacts.Remove(m_ExpiredBoardSwipeContacts[i]);
-            }
         }
 
         private static bool ContainsInProgressContact(BoardContact[] contacts, int contactId)
@@ -904,7 +891,11 @@ namespace BoardBinho
                 return false;
             }
 
-            TryCompleteShotTurnIfSettled();
+            if (m_Phase == MatchPhase.BallInMotion)
+            {
+                CompleteShotTurn();
+            }
+
             return m_Phase == MatchPhase.ReadyToShoot;
         }
 
@@ -1142,7 +1133,7 @@ namespace BoardBinho
             return CountOccupied(m_LeftSlots) == m_LeftSlots.Count && CountOccupied(m_RightSlots) == m_RightSlots.Count;
         }
 
-        private Vector2 ScreenToWorld(Vector2 boardScreenPosition, bool invertY = true)
+        private Vector2 ScreenToWorld(Vector2 boardScreenPosition, bool invertY = false)
         {
             if (m_WorldCamera == null)
             {
@@ -1293,6 +1284,7 @@ namespace BoardBinho
         {
             public Vector2 LastWorldPosition;
             public double LastTimestamp;
+            public bool HasLaunched;
         }
     }
 }
