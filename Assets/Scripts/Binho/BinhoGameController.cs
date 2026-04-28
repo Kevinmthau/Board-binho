@@ -59,6 +59,7 @@ namespace BoardBinho
         private readonly List<DefenderSlot> m_RightSlots = new List<DefenderSlot>();
         private readonly List<DefenderSlot> m_AllSlots = new List<DefenderSlot>();
         private readonly Dictionary<int, SwipeContactState> m_BoardSwipeContacts = new Dictionary<int, SwipeContactState>();
+        private readonly HashSet<int> m_ConsumedBoardSwipeContacts = new HashSet<int>();
         private readonly List<int> m_ExpiredBoardSwipeContacts = new List<int>();
 
         private Material m_SpriteMaterial;
@@ -761,6 +762,7 @@ namespace BoardBinho
         {
             if (m_Phase == MatchPhase.Setup || m_Phase == MatchPhase.GoalPause)
             {
+                PruneBoardSwipeContactState(BoardInput.GetActiveContacts(BoardContactType.Finger));
                 return;
             }
 
@@ -776,47 +778,63 @@ namespace BoardBinho
             for (var i = 0; i < fingers.Length; i++)
             {
                 var contact = fingers[i];
+                if (contact.phase == BoardContactPhase.None ||
+                    contact.phase == BoardContactPhase.Ended ||
+                    contact.phase == BoardContactPhase.Canceled)
+                {
+                    m_BoardSwipeContacts.Remove(contact.contactId);
+                    m_ConsumedBoardSwipeContacts.Remove(contact.contactId);
+                    continue;
+                }
+
+                if (m_ConsumedBoardSwipeContacts.Contains(contact.contactId))
+                {
+                    continue;
+                }
+
                 var worldPosition = ScreenToWorld(contact.screenPosition);
                 var timestamp = contact.timestamp;
 
                 if (!m_BoardSwipeContacts.TryGetValue(contact.contactId, out var swipeContact))
                 {
+                    if (contact.phase != BoardContactPhase.Began || !CanLaunchSwipe())
+                    {
+                        m_ConsumedBoardSwipeContacts.Add(contact.contactId);
+                        continue;
+                    }
+
                     m_BoardSwipeContacts[contact.contactId] = new SwipeContactState
                     {
-                        WorldPosition = worldPosition,
-                        Timestamp = timestamp,
+                        StartWorldPosition = worldPosition,
+                        LastWorldPosition = worldPosition,
+                        LastTimestamp = timestamp,
                     };
                     continue;
                 }
 
                 if (TryLaunchSwipe(
-                    swipeContact.WorldPosition,
+                    swipeContact,
                     worldPosition,
-                    Mathf.Max((float)(timestamp - swipeContact.Timestamp), 1f / 240f)))
+                    Mathf.Max((float)(timestamp - swipeContact.LastTimestamp), 1f / 240f)))
                 {
+                    m_ConsumedBoardSwipeContacts.Add(contact.contactId);
                     return;
                 }
 
-                m_BoardSwipeContacts[contact.contactId] = new SwipeContactState
-                {
-                    WorldPosition = worldPosition,
-                    Timestamp = timestamp,
-                };
+                swipeContact.LastWorldPosition = worldPosition;
+                swipeContact.LastTimestamp = timestamp;
+                m_BoardSwipeContacts[contact.contactId] = swipeContact;
             }
 
+            PruneBoardSwipeContactState(fingers);
+        }
+
+        private void PruneBoardSwipeContactState(BoardContact[] fingers)
+        {
+            m_ExpiredBoardSwipeContacts.Clear();
             foreach (var contactId in m_BoardSwipeContacts.Keys)
             {
-                var contactStillActive = false;
-                for (var i = 0; i < fingers.Length; i++)
-                {
-                    if (fingers[i].contactId == contactId)
-                    {
-                        contactStillActive = true;
-                        break;
-                    }
-                }
-
-                if (!contactStillActive)
+                if (!ContainsInProgressContact(fingers, contactId))
                 {
                     m_ExpiredBoardSwipeContacts.Add(contactId);
                 }
@@ -826,6 +844,33 @@ namespace BoardBinho
             {
                 m_BoardSwipeContacts.Remove(m_ExpiredBoardSwipeContacts[i]);
             }
+
+            m_ExpiredBoardSwipeContacts.Clear();
+            foreach (var contactId in m_ConsumedBoardSwipeContacts)
+            {
+                if (!ContainsInProgressContact(fingers, contactId))
+                {
+                    m_ExpiredBoardSwipeContacts.Add(contactId);
+                }
+            }
+
+            for (var i = 0; i < m_ExpiredBoardSwipeContacts.Count; i++)
+            {
+                m_ConsumedBoardSwipeContacts.Remove(m_ExpiredBoardSwipeContacts[i]);
+            }
+        }
+
+        private static bool ContainsInProgressContact(BoardContact[] contacts, int contactId)
+        {
+            for (var i = 0; i < contacts.Length; i++)
+            {
+                if (contacts[i].contactId == contactId && contacts[i].isInProgress)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void CancelActiveShot()
@@ -864,21 +909,27 @@ namespace BoardBinho
             return m_Phase == MatchPhase.ReadyToShoot;
         }
 
-        private bool TryLaunchSwipe(Vector2 previousWorldPosition, Vector2 currentWorldPosition, float deltaTime)
+        private bool TryLaunchSwipe(SwipeContactState swipeContact, Vector2 currentWorldPosition, float deltaTime)
         {
             if (!CanLaunchSwipe())
             {
                 return false;
             }
 
-            var swipeVector = currentWorldPosition - previousWorldPosition;
+            var swipeVector = currentWorldPosition - swipeContact.LastWorldPosition;
             var swipeDistance = swipeVector.magnitude;
             if (swipeDistance < MinSwipeTravelDistance)
             {
                 return false;
             }
 
-            if (DistanceFromPointToSegment(m_BallBody.position, previousWorldPosition, currentWorldPosition) > BallSwipeCaptureRadius)
+            if (DistanceFromPointToSegment(m_BallBody.position, swipeContact.LastWorldPosition, currentWorldPosition) > BallSwipeCaptureRadius)
+            {
+                return false;
+            }
+
+            var gestureVector = currentWorldPosition - swipeContact.StartWorldPosition;
+            if (gestureVector.sqrMagnitude < MinSwipeTravelDistance * MinSwipeTravelDistance)
             {
                 return false;
             }
@@ -891,7 +942,7 @@ namespace BoardBinho
 
             var swipeStrength = Mathf.InverseLerp(MinSwipeSpeed, MaxSwipeSpeed, swipeSpeed);
             var impulseMagnitude = Mathf.Lerp(MinShotImpulse, MaxShotImpulse, swipeStrength);
-            LaunchShot(swipeVector.normalized * impulseMagnitude);
+            LaunchShot(gestureVector.normalized * impulseMagnitude);
             return true;
         }
 
@@ -1247,8 +1298,9 @@ namespace BoardBinho
 
         private struct SwipeContactState
         {
-            public Vector2 WorldPosition;
-            public double Timestamp;
+            public Vector2 StartWorldPosition;
+            public Vector2 LastWorldPosition;
+            public double LastTimestamp;
         }
     }
 }
