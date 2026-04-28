@@ -15,6 +15,9 @@ namespace BoardBinho
         private const float kFieldScreenFill = 0.94f;
         private const string kFieldBackgroundResourcePath = "Binho/field_background";
         private const float kFieldBackgroundPixelsPerUnit = 100f;
+        private const float kFieldBackgroundPixelWidth = 1536f;
+        private const float kFieldBackgroundPixelHeight = 1024f;
+        private const int kDefendersPerSide = 7;
         private const float kOffBoardGoalClearance = 0.22f;
         private const float kFieldLineInset = 0.08f;
         private const float kWallThickness = 0.22f;
@@ -199,7 +202,7 @@ namespace BoardBinho
 
             GUI.Label(new Rect(0f, 58f, Screen.width, 30f), GetStatusMessage(), bodyStyle);
 
-            var placementText = $"Blue defenders: {CountOccupied(m_LeftSlots)}/5    Orange defenders: {CountOccupied(m_RightSlots)}/5";
+            var placementText = $"Blue defenders: {CountOccupied(m_LeftSlots)}/{m_LeftSlots.Count}    Orange defenders: {CountOccupied(m_RightSlots)}/{m_RightSlots.Count}";
             GUI.Label(new Rect(0f, Screen.height - 46f, Screen.width, 24f), placementText, bodyStyle);
         }
 
@@ -502,15 +505,15 @@ namespace BoardBinho
             var slotRoot = new GameObject("Defender Slots");
             slotRoot.transform.SetParent(parent, false);
 
-            var fieldX = -(PitchHalfWidth - FieldLineInset);
-            var penaltyBoxFrontX = fieldX + PenaltyBoxDepth;
             var leftSlotPositions = new[]
             {
-                new Vector2(fieldX + (GoalBoxDepth * 0.6f), GoalBoxHalfHeight - ScaleY(0.16f)),
-                new Vector2(fieldX + (GoalBoxDepth * 0.6f), -GoalBoxHalfHeight + ScaleY(0.16f)),
-                new Vector2(fieldX + (PenaltyBoxDepth * 0.58f), 0f),
-                new Vector2(penaltyBoxFrontX + ScaleX(0.45f), PenaltyBoxHalfHeight - ScaleY(0.3f)),
-                new Vector2(penaltyBoxFrontX + ScaleX(0.45f), -PenaltyBoxHalfHeight + ScaleY(0.3f)),
+                FieldBackgroundPixelToWorld(180f, 160f),
+                FieldBackgroundPixelToWorld(113f, 343f),
+                FieldBackgroundPixelToWorld(222f, 500f),
+                FieldBackgroundPixelToWorld(113f, 641f),
+                FieldBackgroundPixelToWorld(180f, 816f),
+                FieldBackgroundPixelToWorld(376f, 405f),
+                FieldBackgroundPixelToWorld(376f, 585f),
             };
 
             for (var i = 0; i < leftSlotPositions.Length; i++)
@@ -518,6 +521,13 @@ namespace BoardBinho
                 CreateSlot(slotRoot.transform, PlayerSide.Left, $"Left Slot {i + 1}", leftSlotPositions[i]);
                 CreateSlot(slotRoot.transform, PlayerSide.Right, $"Right Slot {i + 1}", new Vector2(-leftSlotPositions[i].x, leftSlotPositions[i].y));
             }
+        }
+
+        private Vector2 FieldBackgroundPixelToWorld(float x, float y)
+        {
+            return new Vector2(
+                Mathf.Lerp(-ScreenHalfWidth, ScreenHalfWidth, x / kFieldBackgroundPixelWidth),
+                Mathf.Lerp(ScreenHalfHeight, -ScreenHalfHeight, y / kFieldBackgroundPixelHeight));
         }
 
         private void ConfigureCamera()
@@ -591,8 +601,13 @@ namespace BoardBinho
             slotRoot.transform.SetParent(parent, false);
             slotRoot.transform.localPosition = new Vector3(position.x, position.y, 0f);
 
-            var fill = CreateDisc(slotRoot.transform, "Slot Fill", Vector2.zero, DefenderRadius * 2.45f, side == PlayerSide.Left ? new Color(kLeftColor.r, kLeftColor.g, kLeftColor.b, 0.16f) : new Color(kRightColor.r, kRightColor.g, kRightColor.b, 0.16f), 2);
-            var outline = CreateCircleLine(slotRoot.transform, "Slot Outline", Vector2.zero, DefenderRadius * 1.25f, kLineColor, Scale(0.05f), 28, 0f, 360f);
+            GameObject fill = null;
+            LineRenderer outline = null;
+            if (m_FieldBackgroundSprite == null)
+            {
+                fill = CreateDisc(slotRoot.transform, "Slot Fill", Vector2.zero, DefenderRadius * 2.45f, side == PlayerSide.Left ? new Color(kLeftColor.r, kLeftColor.g, kLeftColor.b, 0.16f) : new Color(kRightColor.r, kRightColor.g, kRightColor.b, 0.16f), 2);
+                outline = CreateCircleLine(slotRoot.transform, "Slot Outline", Vector2.zero, DefenderRadius * 1.25f, kLineColor, Scale(0.05f), 28, 0f, 360f);
+            }
 
             var defender = new GameObject("Defender");
             defender.transform.SetParent(slotRoot.transform, false);
@@ -1030,7 +1045,7 @@ namespace BoardBinho
             switch (m_Phase)
             {
                 case MatchPhase.Setup:
-                    return "Place 5 robot defenders on each half: 2 in front of the goal box, 1 in the middle of the penalty box, and 2 just outside the penalty box.";
+                    return "Place " + kDefendersPerSide + " robot defenders on each half, one on each gray placement spot.";
                 case MatchPhase.ReadyToShoot:
                     return GetTurnLabel() + " to shoot. Swipe across the ball in the direction you want it to travel; faster swipes hit harder.";
                 case MatchPhase.Aiming:
@@ -1207,10 +1222,18 @@ namespace BoardBinho
             public void SetOccupied(bool occupied)
             {
                 var tint = Side == PlayerSide.Left ? kLeftColor : kRightColor;
-                var fillRenderer = SlotFill.GetComponent<SpriteRenderer>();
-                fillRenderer.color = occupied ? new Color(tint.r, tint.g, tint.b, 0.08f) : new Color(tint.r, tint.g, tint.b, 0.16f);
-                SlotOutline.startColor = occupied ? new Color(1f, 1f, 1f, 0.4f) : new Color(1f, 1f, 1f, 0.92f);
-                SlotOutline.endColor = SlotOutline.startColor;
+                if (SlotFill != null)
+                {
+                    var fillRenderer = SlotFill.GetComponent<SpriteRenderer>();
+                    fillRenderer.color = occupied ? new Color(tint.r, tint.g, tint.b, 0.08f) : new Color(tint.r, tint.g, tint.b, 0.16f);
+                }
+
+                if (SlotOutline != null)
+                {
+                    SlotOutline.startColor = occupied ? new Color(1f, 1f, 1f, 0.4f) : new Color(1f, 1f, 1f, 0.92f);
+                    SlotOutline.endColor = SlotOutline.startColor;
+                }
+
                 DefenderRoot.SetActive(occupied);
                 DefenderCollider.enabled = occupied;
             }
