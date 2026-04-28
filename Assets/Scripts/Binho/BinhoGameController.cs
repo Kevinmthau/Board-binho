@@ -805,7 +805,6 @@ namespace BoardBinho
 
                     m_BoardSwipeContacts[contact.contactId] = new SwipeContactState
                     {
-                        StartWorldPosition = worldPosition,
                         LastWorldPosition = worldPosition,
                         LastTimestamp = timestamp,
                     };
@@ -928,12 +927,6 @@ namespace BoardBinho
                 return false;
             }
 
-            var gestureVector = currentWorldPosition - swipeContact.StartWorldPosition;
-            if (gestureVector.sqrMagnitude < MinSwipeTravelDistance * MinSwipeTravelDistance)
-            {
-                return false;
-            }
-
             var swipeSpeed = swipeDistance / Mathf.Max(deltaTime, 1f / 240f);
             if (swipeSpeed < MinSwipeSpeed)
             {
@@ -942,7 +935,7 @@ namespace BoardBinho
 
             var swipeStrength = Mathf.InverseLerp(MinSwipeSpeed, MaxSwipeSpeed, swipeSpeed);
             var impulseMagnitude = Mathf.Lerp(MinShotImpulse, MaxShotImpulse, swipeStrength);
-            LaunchShot(gestureVector.normalized * impulseMagnitude);
+            LaunchShot(swipeVector.normalized * impulseMagnitude);
             return true;
         }
 
@@ -1298,7 +1291,6 @@ namespace BoardBinho
 
         private struct SwipeContactState
         {
-            public Vector2 StartWorldPosition;
             public Vector2 LastWorldPosition;
             public double LastTimestamp;
         }
