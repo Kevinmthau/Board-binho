@@ -6,7 +6,6 @@ namespace BoardBinho
     using Board.Input;
 
     using UnityEngine;
-    using UnityEngine.InputSystem;
 
     [DisallowMultipleComponent]
     public sealed class BinhoGameController : MonoBehaviour
@@ -46,8 +45,6 @@ namespace BoardBinho
         private static readonly Color kShadowColor = new Color(0f, 0f, 0f, 0.18f);
 
         [SerializeField] private Camera m_WorldCamera;
-        [SerializeField] private bool m_EnableMouseFallback = true;
-
         private readonly List<DefenderSlot> m_LeftSlots = new List<DefenderSlot>();
         private readonly List<DefenderSlot> m_RightSlots = new List<DefenderSlot>();
         private readonly List<DefenderSlot> m_AllSlots = new List<DefenderSlot>();
@@ -68,14 +65,9 @@ namespace BoardBinho
         private PlayerSide m_LastScoringSide = PlayerSide.Left;
         private int m_LeftScore;
         private int m_RightScore;
-        private bool m_MouseShotActive;
-        private bool m_HandledBoardShotThisFrame;
         private float m_BallStillTimer;
         private float m_GoalPauseTimer;
         private bool m_DidServeInitialKickoff;
-        private Vector2 m_LastMouseWorld;
-        private float m_LastMouseSampleTime;
-
         private float BaseFieldHalfWidth => kFieldWidth * 0.5f;
         private float BaseFieldHalfHeight => kFieldHeight * 0.5f;
         private float ScreenHalfWidth => m_WorldCamera != null && m_WorldCamera.orthographic ? m_WorldCamera.orthographicSize * m_WorldCamera.aspect : BaseFieldHalfWidth;
@@ -145,8 +137,6 @@ namespace BoardBinho
 
         private void Update()
         {
-            m_HandledBoardShotThisFrame = false;
-
             UpdateDefenderPlacements();
             UpdateMatchPhaseFromPlacements();
             UpdateShotInput();
@@ -619,17 +609,11 @@ namespace BoardBinho
 
             TryCompleteShotTurnIfSettled();
             HandleBoardFingerShotInput();
-
-            if (m_EnableMouseFallback && !m_HandledBoardShotThisFrame)
-            {
-                HandleMouseShotInput();
-            }
         }
 
         private void HandleBoardFingerShotInput()
         {
             var fingers = BoardInput.GetActiveContacts(BoardContactType.Finger);
-            m_HandledBoardShotThisFrame = fingers.Length > 0;
             m_ExpiredBoardSwipeContacts.Clear();
 
             for (var i = 0; i < fingers.Length; i++)
@@ -687,52 +671,10 @@ namespace BoardBinho
             }
         }
 
-        private void HandleMouseShotInput()
-        {
-            var mouse = Mouse.current;
-            if (mouse == null)
-            {
-                return;
-            }
-
-            var worldPosition = ScreenToWorld(mouse.position.ReadValue(), false);
-
-            if (!m_MouseShotActive)
-            {
-                if (mouse.leftButton.isPressed)
-                {
-                    m_MouseShotActive = true;
-                    m_LastMouseWorld = worldPosition;
-                    m_LastMouseSampleTime = Time.unscaledTime;
-                }
-
-                return;
-            }
-
-            if (TryLaunchSwipe(
-                m_LastMouseWorld,
-                worldPosition,
-                Mathf.Max(Time.unscaledTime - m_LastMouseSampleTime, 1f / 240f)))
-            {
-                m_LastMouseWorld = worldPosition;
-                m_LastMouseSampleTime = Time.unscaledTime;
-                return;
-            }
-
-            m_LastMouseWorld = worldPosition;
-            m_LastMouseSampleTime = Time.unscaledTime;
-
-            if (mouse.leftButton.wasReleasedThisFrame)
-            {
-                m_MouseShotActive = false;
-            }
-        }
-
         private void CancelActiveShot()
         {
             m_BoardSwipeContacts.Clear();
             m_ExpiredBoardSwipeContacts.Clear();
-            m_MouseShotActive = false;
             if (m_AimLine != null)
             {
                 m_AimLine.enabled = false;

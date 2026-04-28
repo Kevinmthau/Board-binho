@@ -149,7 +149,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::BoardBinho.BinhoGameController
   m_WorldCamera: {fileID: 1752858806}
-  m_EnableMouseFallback: 1
 --- !u!4 &398361532
 Transform:
   m_ObjectHideFlags: 0
