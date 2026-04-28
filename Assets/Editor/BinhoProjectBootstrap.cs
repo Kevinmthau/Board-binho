@@ -57,7 +57,7 @@ namespace BoardBinho.EditorTools
             camera.orthographic = true;
             camera.orthographicSize = 5.5f;
             camera.clearFlags = CameraClearFlags.SolidColor;
-            camera.backgroundColor = new Color(0.05f, 0.08f, 0.06f);
+            camera.backgroundColor = new Color(0.9f, 0.93f, 0.91f);
             cameraObject.tag = "MainCamera";
             cameraObject.transform.position = new Vector3(0f, 0f, -10f);
             cameraObject.AddComponent<AudioListener>();
