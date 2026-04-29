@@ -665,6 +665,11 @@ namespace BoardBinho
 
         private void UpdateDefenderPlacements()
         {
+            if (m_Phase == MatchPhase.BallInMotion)
+            {
+                return;
+            }
+
             var glyphs = BoardInput.GetActiveContacts(BoardContactType.Glyph);
             var activeGlyphs = new List<ContactWorldState>(glyphs.Length);
 
