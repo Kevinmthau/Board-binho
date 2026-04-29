@@ -34,7 +34,6 @@ namespace BoardBinho
         private const float kPenaltyMarkDistance = 1.88f;
         private const float kCornerArcRadius = 0.34f;
         private const float kDefenderRadius = 0.32f;
-        private const float kSlotSnapRadius = 0.95f;
         private const float kBallRadius = 0.2f;
         private const float kBallSwipeCaptureRadius = 0.55f;
         private const float kMinSwipeTravelDistance = 0.05f;
@@ -112,7 +111,6 @@ namespace BoardBinho
         private float PenaltyMarkDistance => ScaleX(kPenaltyMarkDistance);
         private float CornerArcRadius => Scale(kCornerArcRadius);
         private float DefenderRadius => Scale(kDefenderRadius);
-        private float SlotSnapRadius => Scale(kSlotSnapRadius);
         private float BallRadius => Scale(kBallRadius);
         private float BallSwipeCaptureRadius => Scale(kBallSwipeCaptureRadius);
         private float MinSwipeTravelDistance => Scale(kMinSwipeTravelDistance);
@@ -517,29 +515,11 @@ namespace BoardBinho
             var slotRoot = new GameObject("Defender Slots");
             slotRoot.transform.SetParent(parent, false);
 
-            var leftSlotPositions = new[]
+            for (var i = 0; i < kDefendersPerSide; i++)
             {
-                FieldBackgroundPixelToWorld(225f, 169f),
-                FieldBackgroundPixelToWorld(141f, 362f),
-                FieldBackgroundPixelToWorld(278f, 527f),
-                FieldBackgroundPixelToWorld(141f, 676f),
-                FieldBackgroundPixelToWorld(225f, 861f),
-                FieldBackgroundPixelToWorld(470f, 427f),
-                FieldBackgroundPixelToWorld(470f, 617f),
-            };
-
-            for (var i = 0; i < leftSlotPositions.Length; i++)
-            {
-                CreateSlot(slotRoot.transform, PlayerSide.Left, $"Left Slot {i + 1}", leftSlotPositions[i]);
-                CreateSlot(slotRoot.transform, PlayerSide.Right, $"Right Slot {i + 1}", new Vector2(-leftSlotPositions[i].x, leftSlotPositions[i].y));
+                CreateSlot(slotRoot.transform, PlayerSide.Left, $"Left Defender {i + 1}", Vector2.zero);
+                CreateSlot(slotRoot.transform, PlayerSide.Right, $"Right Defender {i + 1}", Vector2.zero);
             }
-        }
-
-        private Vector2 FieldBackgroundPixelToWorld(float x, float y)
-        {
-            return new Vector2(
-                Mathf.Lerp(-VisualPlayfieldHalfWidth, VisualPlayfieldHalfWidth, x / kFieldBackgroundPixelWidth),
-                FieldBackgroundPixelYToWorld(y));
         }
 
         private float FieldBackgroundPixelYToWorld(float y)
@@ -635,13 +615,11 @@ namespace BoardBinho
         {
             var slotRoot = new GameObject(slotName);
             slotRoot.transform.SetParent(parent, false);
-            slotRoot.transform.localPosition = new Vector3(position.x, position.y, 0f);
-
-            var fill = CreateDisc(slotRoot.transform, "Slot Fill", Vector2.zero, DefenderRadius * 2.45f, side == PlayerSide.Left ? new Color(kLeftColor.r, kLeftColor.g, kLeftColor.b, 0.16f) : new Color(kRightColor.r, kRightColor.g, kRightColor.b, 0.16f), 2);
-            var outline = CreateCircleLine(slotRoot.transform, "Slot Outline", Vector2.zero, DefenderRadius * 1.25f, kLineColor, Scale(0.05f), 28, 0f, 360f);
+            slotRoot.transform.localPosition = Vector3.zero;
 
             var defender = new GameObject("Defender");
             defender.transform.SetParent(slotRoot.transform, false);
+            defender.transform.localPosition = new Vector3(position.x, position.y, 0f);
             defender.transform.localScale = Vector3.one * (DefenderRadius * 2f);
 
             var shadow = CreateDisc(defender.transform, "Shadow", new Vector2(0.05f, -0.07f), 1.22f, kShadowColor, 3);
@@ -666,12 +644,8 @@ namespace BoardBinho
 
             var slot = new DefenderSlot
             {
-                Side = side,
                 Position = position,
-                SlotFill = fill,
-                SlotOutline = outline,
                 DefenderRoot = defender,
-                DefenderRenderer = defenderRenderer,
                 DefenderCollider = collider,
             };
 
@@ -703,13 +677,15 @@ namespace BoardBinho
                 });
             }
 
+            activeGlyphs.Sort((left, right) => left.ContactId.CompareTo(right.ContactId));
+
             for (var i = 0; i < m_AllSlots.Count; i++)
             {
                 m_AllSlots[i].ContactId = -1;
             }
 
-            AssignSlots(m_LeftSlots, activeGlyphs, false);
-            AssignSlots(m_RightSlots, activeGlyphs, true);
+            AssignSlots(m_LeftSlots, activeGlyphs, PlayerSide.Left);
+            AssignSlots(m_RightSlots, activeGlyphs, PlayerSide.Right);
 
             for (var i = 0; i < m_AllSlots.Count; i++)
             {
@@ -717,49 +693,41 @@ namespace BoardBinho
             }
         }
 
-        private void AssignSlots(List<DefenderSlot> slots, List<ContactWorldState> contacts, bool rightSide)
+        private void AssignSlots(List<DefenderSlot> slots, List<ContactWorldState> contacts, PlayerSide side)
         {
-            var claimedContactIds = new HashSet<int>();
-            for (var i = 0; i < slots.Count; i++)
+            var slotIndex = 0;
+            for (var i = 0; i < contacts.Count && slotIndex < slots.Count; i++)
             {
-                var slot = slots[i];
-                var bestDistance = float.MaxValue;
-                var bestContactId = -1;
-
-                for (var j = 0; j < contacts.Count; j++)
+                var candidate = contacts[i];
+                if (!IsContactOnSide(candidate.WorldPosition, side))
                 {
-                    var candidate = contacts[j];
-                    if (claimedContactIds.Contains(candidate.ContactId))
-                    {
-                        continue;
-                    }
-
-                    if (rightSide && candidate.WorldPosition.x < 0f)
-                    {
-                        continue;
-                    }
-
-                    if (!rightSide && candidate.WorldPosition.x > 0f)
-                    {
-                        continue;
-                    }
-
-                    var distance = Vector2.Distance(slot.Position, candidate.WorldPosition);
-                    if (distance > SlotSnapRadius || distance >= bestDistance)
-                    {
-                        continue;
-                    }
-
-                    bestDistance = distance;
-                    bestContactId = candidate.ContactId;
+                    continue;
                 }
 
-                slot.ContactId = bestContactId;
-                if (bestContactId >= 0)
-                {
-                    claimedContactIds.Add(bestContactId);
-                }
+                var slot = slots[slotIndex];
+                slot.ContactId = candidate.ContactId;
+                slot.Position = candidate.WorldPosition;
+                slotIndex++;
             }
+        }
+
+        private bool IsContactOnSide(Vector2 position, PlayerSide side)
+        {
+            var minX = -PitchHalfWidth + DefenderRadius;
+            var maxX = PitchHalfWidth - DefenderRadius;
+            var minY = -PitchHalfHeight + DefenderRadius;
+            var maxY = PitchHalfHeight - DefenderRadius;
+            if (position.y < minY || position.y > maxY)
+            {
+                return false;
+            }
+
+            if (side == PlayerSide.Left)
+            {
+                return position.x >= minX && position.x < 0f;
+            }
+
+            return position.x <= maxX && position.x > 0f;
         }
 
         private void UpdateMatchPhaseFromPlacements()
@@ -1144,7 +1112,7 @@ namespace BoardBinho
             switch (m_Phase)
             {
                 case MatchPhase.Setup:
-                    return "Place " + kDefendersPerSide + " robot defenders on each half, one on each gray placement spot.";
+                    return "Place " + kDefendersPerSide + " robot defenders anywhere on each team's half.";
                 case MatchPhase.ReadyToShoot:
                     return GetTurnLabel() + " to shoot. Swipe across the ball in the direction you want it to travel; faster swipes hit harder.";
                 case MatchPhase.Aiming:
@@ -1309,30 +1277,14 @@ namespace BoardBinho
 
         private sealed class DefenderSlot
         {
-            public PlayerSide Side;
             public Vector2 Position;
             public int ContactId = -1;
-            public GameObject SlotFill;
-            public LineRenderer SlotOutline;
             public GameObject DefenderRoot;
-            public SpriteRenderer DefenderRenderer;
             public CircleCollider2D DefenderCollider;
 
             public void SetOccupied(bool occupied)
             {
-                var tint = Side == PlayerSide.Left ? kLeftColor : kRightColor;
-                if (SlotFill != null)
-                {
-                    var fillRenderer = SlotFill.GetComponent<SpriteRenderer>();
-                    fillRenderer.color = occupied ? new Color(tint.r, tint.g, tint.b, 0.08f) : new Color(tint.r, tint.g, tint.b, 0.16f);
-                }
-
-                if (SlotOutline != null)
-                {
-                    SlotOutline.startColor = occupied ? new Color(1f, 1f, 1f, 0.4f) : new Color(1f, 1f, 1f, 0.92f);
-                    SlotOutline.endColor = SlotOutline.startColor;
-                }
-
+                DefenderRoot.transform.localPosition = new Vector3(Position.x, Position.y, 0f);
                 DefenderRoot.SetActive(occupied);
                 DefenderCollider.enabled = occupied;
             }
