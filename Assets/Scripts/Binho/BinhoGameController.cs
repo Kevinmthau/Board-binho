@@ -17,6 +17,8 @@ namespace BoardBinho
         private const float kFieldBackgroundPixelsPerUnit = 100f;
         private const float kFieldBackgroundPixelWidth = 1536f;
         private const float kFieldBackgroundPixelHeight = 1024f;
+        private const float kGoalMouthTopPixelY = 342f;
+        private const float kGoalMouthBottomPixelY = 642f;
         private const int kDefendersPerSide = 7;
         private const float kOffBoardGoalClearance = 0.22f;
         private const float kFieldLineInset = 0.08f;
@@ -111,7 +113,12 @@ namespace BoardBinho
         private float MinShotImpulse => Scale(kMinShotImpulse);
         private float MaxShotImpulse => Scale(kMaxShotImpulse);
         private float BallRestVelocity => Scale(kBallRestVelocity);
-        private float GoalScoreDepth => Mathf.Max(BallRadius * 0.6f, GoalDepth * 0.2f);
+        private float GoalMouthTopY => m_FieldBackgroundSprite != null ? FieldBackgroundPixelYToWorld(kGoalMouthTopPixelY) : GoalHalfHeight;
+        private float GoalMouthBottomY => m_FieldBackgroundSprite != null ? FieldBackgroundPixelYToWorld(kGoalMouthBottomPixelY) : -GoalHalfHeight;
+        private float GoalMouthCenterY => (GoalMouthTopY + GoalMouthBottomY) * 0.5f;
+        private float GoalMouthHeight => GoalMouthTopY - GoalMouthBottomY;
+        private float GoalTunnelDepth => Mathf.Max(ScaleX(0.25f), ScreenHalfWidth - PitchHalfWidth);
+        private float GoalScoreLineX => ScreenHalfWidth - BallRadius;
 
         private float ScaleX(float value)
         {
@@ -321,26 +328,28 @@ namespace BoardBinho
 
         private void BuildWalls(Transform parent)
         {
-            var upperWallHeight = PitchHalfHeight - GoalHalfHeight;
-            var upperWallCenterY = GoalHalfHeight + (upperWallHeight * 0.5f);
+            var upperWallHeight = PitchHalfHeight - GoalMouthTopY;
+            var upperWallCenterY = GoalMouthTopY + (upperWallHeight * 0.5f);
+            var lowerWallHeight = GoalMouthBottomY + PitchHalfHeight;
+            var lowerWallCenterY = -PitchHalfHeight + (lowerWallHeight * 0.5f);
             var sideWallX = PitchHalfWidth + (WallThickness * 0.5f);
-            var goalBackX = PitchHalfWidth + GoalDepth + (WallThickness * 0.5f);
-            var goalInteriorX = PitchHalfWidth + (GoalDepth * 0.5f);
+            var goalBackX = ScreenHalfWidth + (WallThickness * 0.5f);
+            var goalInteriorX = PitchHalfWidth + (GoalTunnelDepth * 0.5f);
 
             CreateWall(parent, "Top Wall", new Vector2(0f, PitchHalfHeight + (WallThickness * 0.5f)), new Vector2(PitchHalfWidth * 2f, WallThickness));
             CreateWall(parent, "Bottom Wall", new Vector2(0f, -PitchHalfHeight - (WallThickness * 0.5f)), new Vector2(PitchHalfWidth * 2f, WallThickness));
 
             CreateWall(parent, "Left Upper Wall", new Vector2(-sideWallX, upperWallCenterY), new Vector2(WallThickness, upperWallHeight));
-            CreateWall(parent, "Left Lower Wall", new Vector2(-sideWallX, -upperWallCenterY), new Vector2(WallThickness, upperWallHeight));
+            CreateWall(parent, "Left Lower Wall", new Vector2(-sideWallX, lowerWallCenterY), new Vector2(WallThickness, lowerWallHeight));
             CreateWall(parent, "Right Upper Wall", new Vector2(sideWallX, upperWallCenterY), new Vector2(WallThickness, upperWallHeight));
-            CreateWall(parent, "Right Lower Wall", new Vector2(sideWallX, -upperWallCenterY), new Vector2(WallThickness, upperWallHeight));
+            CreateWall(parent, "Right Lower Wall", new Vector2(sideWallX, lowerWallCenterY), new Vector2(WallThickness, lowerWallHeight));
 
-            CreateWall(parent, "Left Goal Back", new Vector2(-goalBackX, 0f), new Vector2(WallThickness, GoalHalfHeight * 2f));
-            CreateWall(parent, "Right Goal Back", new Vector2(goalBackX, 0f), new Vector2(WallThickness, GoalHalfHeight * 2f));
-            CreateWall(parent, "Left Goal Roof", new Vector2(-goalInteriorX, GoalHalfHeight + (WallThickness * 0.5f)), new Vector2(GoalDepth, WallThickness));
-            CreateWall(parent, "Left Goal Floor", new Vector2(-goalInteriorX, -GoalHalfHeight - (WallThickness * 0.5f)), new Vector2(GoalDepth, WallThickness));
-            CreateWall(parent, "Right Goal Roof", new Vector2(goalInteriorX, GoalHalfHeight + (WallThickness * 0.5f)), new Vector2(GoalDepth, WallThickness));
-            CreateWall(parent, "Right Goal Floor", new Vector2(goalInteriorX, -GoalHalfHeight - (WallThickness * 0.5f)), new Vector2(GoalDepth, WallThickness));
+            CreateWall(parent, "Left Goal Back", new Vector2(-goalBackX, GoalMouthCenterY), new Vector2(WallThickness, GoalMouthHeight));
+            CreateWall(parent, "Right Goal Back", new Vector2(goalBackX, GoalMouthCenterY), new Vector2(WallThickness, GoalMouthHeight));
+            CreateWall(parent, "Left Goal Roof", new Vector2(-goalInteriorX, GoalMouthTopY + (WallThickness * 0.5f)), new Vector2(GoalTunnelDepth, WallThickness));
+            CreateWall(parent, "Left Goal Floor", new Vector2(-goalInteriorX, GoalMouthBottomY - (WallThickness * 0.5f)), new Vector2(GoalTunnelDepth, WallThickness));
+            CreateWall(parent, "Right Goal Roof", new Vector2(goalInteriorX, GoalMouthTopY + (WallThickness * 0.5f)), new Vector2(GoalTunnelDepth, WallThickness));
+            CreateWall(parent, "Right Goal Floor", new Vector2(goalInteriorX, GoalMouthBottomY - (WallThickness * 0.5f)), new Vector2(GoalTunnelDepth, WallThickness));
         }
 
         private void BuildFieldLines(Transform parent)
@@ -527,7 +536,12 @@ namespace BoardBinho
         {
             return new Vector2(
                 Mathf.Lerp(-ScreenHalfWidth, ScreenHalfWidth, x / kFieldBackgroundPixelWidth),
-                Mathf.Lerp(ScreenHalfHeight, -ScreenHalfHeight, y / kFieldBackgroundPixelHeight));
+                FieldBackgroundPixelYToWorld(y));
+        }
+
+        private float FieldBackgroundPixelYToWorld(float y)
+        {
+            return Mathf.Lerp(ScreenHalfHeight, -ScreenHalfHeight, y / kFieldBackgroundPixelHeight);
         }
 
         private void ConfigureCamera()
@@ -1013,16 +1027,16 @@ namespace BoardBinho
             }
 
             var position = m_BallBody.position;
-            if (Mathf.Abs(position.y) > GoalHalfHeight - ScaleY(0.05f))
+            if (position.y > GoalMouthTopY - ScaleY(0.05f) || position.y < GoalMouthBottomY + ScaleY(0.05f))
             {
                 return;
             }
 
-            if (position.x <= -PitchHalfWidth - GoalScoreDepth)
+            if (position.x <= -GoalScoreLineX)
             {
                 RegisterGoal(PlayerSide.Right);
             }
-            else if (position.x >= PitchHalfWidth + GoalScoreDepth)
+            else if (position.x >= GoalScoreLineX)
             {
                 RegisterGoal(PlayerSide.Left);
             }
