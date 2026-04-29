@@ -174,7 +174,7 @@ namespace BoardBinho
                     m_GoalPauseTimer = 0f;
                     ResetBallToCenter();
                     m_CurrentTurn = m_LastScoringSide == PlayerSide.Left ? PlayerSide.Right : PlayerSide.Left;
-                    m_Phase = AllSlotsOccupied() ? MatchPhase.ReadyToShoot : MatchPhase.Setup;
+                    m_Phase = CanPlayWithCurrentDefenders() ? MatchPhase.ReadyToShoot : MatchPhase.Setup;
                 }
             }
         }
@@ -665,11 +665,6 @@ namespace BoardBinho
 
         private void UpdateDefenderPlacements()
         {
-            if (m_Phase == MatchPhase.BallInMotion)
-            {
-                return;
-            }
-
             var glyphs = BoardInput.GetActiveContacts(BoardContactType.Glyph);
             var activeGlyphs = new List<ContactWorldState>(glyphs.Length);
 
@@ -737,7 +732,7 @@ namespace BoardBinho
 
         private void UpdateMatchPhaseFromPlacements()
         {
-            if (!AllSlotsOccupied())
+            if (!CanPlayWithCurrentDefenders())
             {
                 CancelActiveShot();
                 StopBall();
@@ -880,7 +875,7 @@ namespace BoardBinho
                 return false;
             }
 
-            if (!AllSlotsOccupied())
+            if (!CanPlayWithCurrentDefenders())
             {
                 return false;
             }
@@ -1168,6 +1163,11 @@ namespace BoardBinho
         private bool AllSlotsOccupied()
         {
             return CountOccupied(m_LeftSlots) == m_LeftSlots.Count && CountOccupied(m_RightSlots) == m_RightSlots.Count;
+        }
+
+        private bool CanPlayWithCurrentDefenders()
+        {
+            return m_DidServeInitialKickoff || AllSlotsOccupied();
         }
 
         private Vector2 ScreenToWorld(Vector2 boardScreenPosition, bool invertY = false)
