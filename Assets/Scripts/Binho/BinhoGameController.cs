@@ -85,6 +85,14 @@ namespace BoardBinho
         private float BaseFieldHalfHeight => kFieldHeight * 0.5f;
         private float ScreenHalfWidth => m_WorldCamera != null && m_WorldCamera.orthographic ? m_WorldCamera.orthographicSize * m_WorldCamera.aspect : BaseFieldHalfWidth;
         private float ScreenHalfHeight => m_WorldCamera != null && m_WorldCamera.orthographic ? m_WorldCamera.orthographicSize : BaseFieldHalfHeight;
+        private float FieldBackgroundAspect => m_FieldBackgroundSprite != null && m_FieldBackgroundSprite.rect.height > Mathf.Epsilon
+            ? m_FieldBackgroundSprite.rect.width / m_FieldBackgroundSprite.rect.height
+            : kFieldBackgroundPixelWidth / kFieldBackgroundPixelHeight;
+        private Vector2 FieldBackgroundWorldSize => CalculateFieldBackgroundWorldSize();
+        private float FieldBackgroundHalfWidth => FieldBackgroundWorldSize.x * 0.5f;
+        private float FieldBackgroundHalfHeight => FieldBackgroundWorldSize.y * 0.5f;
+        private float VisualPlayfieldHalfWidth => m_FieldBackgroundSprite != null ? FieldBackgroundHalfWidth : ScreenHalfWidth;
+        private float VisualPlayfieldHalfHeight => m_FieldBackgroundSprite != null ? FieldBackgroundHalfHeight : ScreenHalfHeight;
         private float GoalDisplayHalfWidth => BaseFieldHalfWidth + kGoalDepth + kWallThickness + kOffBoardGoalClearance;
         private float UniformFieldScale => Mathf.Min(ScreenHalfWidth / GoalDisplayHalfWidth, ScreenHalfHeight / BaseFieldHalfHeight) * kFieldScreenFill;
         private float PitchHalfWidth => BaseFieldHalfWidth * UniformFieldScale;
@@ -115,8 +123,8 @@ namespace BoardBinho
         private float BallRestVelocity => Scale(kBallRestVelocity);
         private float GoalMouthTopY => m_FieldBackgroundSprite != null ? FieldBackgroundPixelYToWorld(kGoalMouthTopPixelY) : GoalHalfHeight;
         private float GoalMouthBottomY => m_FieldBackgroundSprite != null ? FieldBackgroundPixelYToWorld(kGoalMouthBottomPixelY) : -GoalHalfHeight;
-        private float GoalTunnelDepth => Mathf.Max(ScaleX(0.25f), ScreenHalfWidth - PitchHalfWidth);
-        private float GoalScoreLineX => ScreenHalfWidth - BallRadius;
+        private float GoalTunnelDepth => Mathf.Max(ScaleX(0.25f), VisualPlayfieldHalfWidth - PitchHalfWidth);
+        private float GoalScoreLineX => VisualPlayfieldHalfWidth - BallRadius;
 
         private float ScaleX(float value)
         {
@@ -304,8 +312,8 @@ namespace BoardBinho
             var hasFieldBackground = m_FieldBackgroundSprite != null;
             if (hasFieldBackground)
             {
-                var screenSurfaceSize = new Vector2(ScreenHalfWidth * 2f, ScreenHalfHeight * 2f);
-                CreateSpriteQuad(fieldRoot.transform, "Field Background", Vector2.zero, screenSurfaceSize, m_FieldBackgroundSprite, Color.white, -0.13f, -6);
+                CreateQuad(fieldRoot.transform, "Field Backdrop", Vector2.zero, new Vector2(ScreenHalfWidth * 2f, ScreenHalfHeight * 2f), kFieldEdgeColor, -0.14f, -7);
+                CreateSpriteQuad(fieldRoot.transform, "Field Background", Vector2.zero, FieldBackgroundWorldSize, m_FieldBackgroundSprite, Color.white, -0.13f, -6);
             }
             else
             {
@@ -530,13 +538,32 @@ namespace BoardBinho
         private Vector2 FieldBackgroundPixelToWorld(float x, float y)
         {
             return new Vector2(
-                Mathf.Lerp(-ScreenHalfWidth, ScreenHalfWidth, x / kFieldBackgroundPixelWidth),
+                Mathf.Lerp(-VisualPlayfieldHalfWidth, VisualPlayfieldHalfWidth, x / kFieldBackgroundPixelWidth),
                 FieldBackgroundPixelYToWorld(y));
         }
 
         private float FieldBackgroundPixelYToWorld(float y)
         {
-            return Mathf.Lerp(ScreenHalfHeight, -ScreenHalfHeight, y / kFieldBackgroundPixelHeight);
+            return Mathf.Lerp(VisualPlayfieldHalfHeight, -VisualPlayfieldHalfHeight, y / kFieldBackgroundPixelHeight);
+        }
+
+        private Vector2 CalculateFieldBackgroundWorldSize()
+        {
+            var screenSize = new Vector2(ScreenHalfWidth * 2f, ScreenHalfHeight * 2f);
+            if (screenSize.x <= Mathf.Epsilon || screenSize.y <= Mathf.Epsilon)
+            {
+                return screenSize;
+            }
+
+            var backgroundAspect = FieldBackgroundAspect;
+            var screenAspect = screenSize.x / screenSize.y;
+
+            if (screenAspect > backgroundAspect)
+            {
+                return new Vector2(screenSize.y * backgroundAspect, screenSize.y);
+            }
+
+            return new Vector2(screenSize.x, screenSize.x / backgroundAspect);
         }
 
         private void ConfigureCamera()
