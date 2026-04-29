@@ -15,10 +15,10 @@ namespace BoardBinho
         private const float kFieldScreenFill = 0.94f;
         private const string kFieldBackgroundResourcePath = "Binho/field_background";
         private const float kFieldBackgroundPixelsPerUnit = 100f;
-        private const float kFieldBackgroundPixelWidth = 1536f;
-        private const float kFieldBackgroundPixelHeight = 1024f;
-        private const float kGoalMouthTopPixelY = 342f;
-        private const float kGoalMouthBottomPixelY = 642f;
+        private const float kFieldBackgroundPixelWidth = 1920f;
+        private const float kFieldBackgroundPixelHeight = 1080f;
+        private const float kGoalMouthTopPixelY = 361f;
+        private const float kGoalMouthBottomPixelY = 677f;
         private const int kDefendersPerSide = 7;
         private const float kOffBoardGoalClearance = 0.22f;
         private const float kFieldLineInset = 0.08f;
@@ -519,13 +519,13 @@ namespace BoardBinho
 
             var leftSlotPositions = new[]
             {
-                FieldBackgroundPixelToWorld(180f, 160f),
-                FieldBackgroundPixelToWorld(113f, 343f),
-                FieldBackgroundPixelToWorld(222f, 500f),
-                FieldBackgroundPixelToWorld(113f, 641f),
-                FieldBackgroundPixelToWorld(180f, 816f),
-                FieldBackgroundPixelToWorld(376f, 405f),
-                FieldBackgroundPixelToWorld(376f, 585f),
+                FieldBackgroundPixelToWorld(225f, 169f),
+                FieldBackgroundPixelToWorld(141f, 362f),
+                FieldBackgroundPixelToWorld(278f, 527f),
+                FieldBackgroundPixelToWorld(141f, 676f),
+                FieldBackgroundPixelToWorld(225f, 861f),
+                FieldBackgroundPixelToWorld(470f, 427f),
+                FieldBackgroundPixelToWorld(470f, 617f),
             };
 
             for (var i = 0; i < leftSlotPositions.Length; i++)
