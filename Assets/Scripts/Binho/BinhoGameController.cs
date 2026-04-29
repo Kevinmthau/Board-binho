@@ -1016,7 +1016,7 @@ namespace BoardBinho
 
         private void CheckForGoal()
         {
-            if (m_BallBody == null || m_Phase == MatchPhase.GoalPause)
+            if (m_BallBody == null || m_Phase != MatchPhase.BallInMotion)
             {
                 return;
             }
@@ -1064,11 +1064,13 @@ namespace BoardBinho
                 return;
             }
 
+            SetBallInPlay(true);
             m_BallBody.position = Vector2.zero;
+            m_BallBody.transform.position = new Vector3(0f, 0f, m_BallBody.transform.position.z);
             m_BallBody.linearVelocity = Vector2.zero;
             m_BallBody.angularVelocity = 0f;
             m_BallStillTimer = 0f;
-            SetBallInPlay(true);
+            Physics2D.SyncTransforms();
             ClearBallTrail();
         }
 
