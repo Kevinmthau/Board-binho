@@ -94,7 +94,7 @@ namespace BoardBinho
         private float VisualPlayfieldHalfWidth => m_FieldBackgroundSprite != null ? FieldBackgroundHalfWidth : ScreenHalfWidth;
         private float VisualPlayfieldHalfHeight => m_FieldBackgroundSprite != null ? FieldBackgroundHalfHeight : ScreenHalfHeight;
         private float GoalDisplayHalfWidth => BaseFieldHalfWidth + kGoalDepth + kWallThickness + kOffBoardGoalClearance;
-        private float UniformFieldScale => Mathf.Min(ScreenHalfWidth / GoalDisplayHalfWidth, ScreenHalfHeight / BaseFieldHalfHeight) * kFieldScreenFill;
+        private float UniformFieldScale => Mathf.Min(VisualPlayfieldHalfWidth / GoalDisplayHalfWidth, VisualPlayfieldHalfHeight / BaseFieldHalfHeight) * kFieldScreenFill;
         private float PitchHalfWidth => BaseFieldHalfWidth * UniformFieldScale;
         private float PitchHalfHeight => BaseFieldHalfHeight * UniformFieldScale;
         private float HorizontalFieldScale => UniformFieldScale;
