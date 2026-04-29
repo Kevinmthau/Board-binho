@@ -115,8 +115,6 @@ namespace BoardBinho
         private float BallRestVelocity => Scale(kBallRestVelocity);
         private float GoalMouthTopY => m_FieldBackgroundSprite != null ? FieldBackgroundPixelYToWorld(kGoalMouthTopPixelY) : GoalHalfHeight;
         private float GoalMouthBottomY => m_FieldBackgroundSprite != null ? FieldBackgroundPixelYToWorld(kGoalMouthBottomPixelY) : -GoalHalfHeight;
-        private float GoalMouthCenterY => (GoalMouthTopY + GoalMouthBottomY) * 0.5f;
-        private float GoalMouthHeight => GoalMouthTopY - GoalMouthBottomY;
         private float GoalTunnelDepth => Mathf.Max(ScaleX(0.25f), ScreenHalfWidth - PitchHalfWidth);
         private float GoalScoreLineX => ScreenHalfWidth - BallRadius;
 
@@ -333,7 +331,6 @@ namespace BoardBinho
             var lowerWallHeight = GoalMouthBottomY + PitchHalfHeight;
             var lowerWallCenterY = -PitchHalfHeight + (lowerWallHeight * 0.5f);
             var sideWallX = PitchHalfWidth + (WallThickness * 0.5f);
-            var goalBackX = ScreenHalfWidth + (WallThickness * 0.5f);
             var goalInteriorX = PitchHalfWidth + (GoalTunnelDepth * 0.5f);
 
             CreateWall(parent, "Top Wall", new Vector2(0f, PitchHalfHeight + (WallThickness * 0.5f)), new Vector2(PitchHalfWidth * 2f, WallThickness));
@@ -344,8 +341,6 @@ namespace BoardBinho
             CreateWall(parent, "Right Upper Wall", new Vector2(sideWallX, upperWallCenterY), new Vector2(WallThickness, upperWallHeight));
             CreateWall(parent, "Right Lower Wall", new Vector2(sideWallX, lowerWallCenterY), new Vector2(WallThickness, lowerWallHeight));
 
-            CreateWall(parent, "Left Goal Back", new Vector2(-goalBackX, GoalMouthCenterY), new Vector2(WallThickness, GoalMouthHeight));
-            CreateWall(parent, "Right Goal Back", new Vector2(goalBackX, GoalMouthCenterY), new Vector2(WallThickness, GoalMouthHeight));
             CreateWall(parent, "Left Goal Roof", new Vector2(-goalInteriorX, GoalMouthTopY + (WallThickness * 0.5f)), new Vector2(GoalTunnelDepth, WallThickness));
             CreateWall(parent, "Left Goal Floor", new Vector2(-goalInteriorX, GoalMouthBottomY - (WallThickness * 0.5f)), new Vector2(GoalTunnelDepth, WallThickness));
             CreateWall(parent, "Right Goal Roof", new Vector2(goalInteriorX, GoalMouthTopY + (WallThickness * 0.5f)), new Vector2(GoalTunnelDepth, WallThickness));
@@ -1046,6 +1041,7 @@ namespace BoardBinho
         {
             StopBall();
             CancelActiveShot();
+            SetBallInPlay(false);
 
             m_LastScoringSide = scorer;
             if (scorer == PlayerSide.Left)
@@ -1072,6 +1068,8 @@ namespace BoardBinho
             m_BallBody.linearVelocity = Vector2.zero;
             m_BallBody.angularVelocity = 0f;
             m_BallStillTimer = 0f;
+            SetBallInPlay(true);
+            ClearBallTrail();
         }
 
         private void StopBall()
@@ -1083,6 +1081,38 @@ namespace BoardBinho
 
             m_BallBody.linearVelocity = Vector2.zero;
             m_BallBody.angularVelocity = 0f;
+        }
+
+        private void SetBallInPlay(bool inPlay)
+        {
+            if (m_BallRenderer != null)
+            {
+                m_BallRenderer.enabled = inPlay;
+            }
+
+            if (m_BallBody != null)
+            {
+                m_BallBody.simulated = inPlay;
+            }
+
+            var trail = m_BallBody != null ? m_BallBody.GetComponent<TrailRenderer>() : null;
+            if (trail != null)
+            {
+                trail.emitting = inPlay;
+                if (!inPlay)
+                {
+                    trail.Clear();
+                }
+            }
+        }
+
+        private void ClearBallTrail()
+        {
+            var trail = m_BallBody != null ? m_BallBody.GetComponent<TrailRenderer>() : null;
+            if (trail != null)
+            {
+                trail.Clear();
+            }
         }
 
         private string GetStatusMessage()
