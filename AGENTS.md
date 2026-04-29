@@ -70,6 +70,8 @@ using Board;
 
 ## Build and deploy loop
 
+The build helper resolves `bdb` from `BDB_BIN`, `PATH`, `Tools/bdb`, `$HOME/Desktop/bdb`, and known Board demo tool paths. On this workstation, `/Users/kevinthau/Desktop/bdb` is the available fallback when plain `bdb` is not on `PATH`.
+
 ```bash
 bdb status
 bdb install Builds/Android/BoardBinho.apk
