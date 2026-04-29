@@ -17,8 +17,8 @@ namespace BoardBinho
         private const float kFieldBackgroundPixelsPerUnit = 100f;
         private const float kFieldBackgroundPixelWidth = 1920f;
         private const float kFieldBackgroundPixelHeight = 1080f;
-        private const float kGoalMouthTopPixelY = 361f;
-        private const float kGoalMouthBottomPixelY = 677f;
+        private const float kGoalMouthTopPixelY = 374f;
+        private const float kGoalMouthBottomPixelY = 704f;
         private const int kDefendersPerSide = 7;
         private const float kOffBoardGoalClearance = 0.22f;
         private const float kFieldLineInset = 0.08f;
@@ -637,13 +637,8 @@ namespace BoardBinho
             slotRoot.transform.SetParent(parent, false);
             slotRoot.transform.localPosition = new Vector3(position.x, position.y, 0f);
 
-            GameObject fill = null;
-            LineRenderer outline = null;
-            if (m_FieldBackgroundSprite == null)
-            {
-                fill = CreateDisc(slotRoot.transform, "Slot Fill", Vector2.zero, DefenderRadius * 2.45f, side == PlayerSide.Left ? new Color(kLeftColor.r, kLeftColor.g, kLeftColor.b, 0.16f) : new Color(kRightColor.r, kRightColor.g, kRightColor.b, 0.16f), 2);
-                outline = CreateCircleLine(slotRoot.transform, "Slot Outline", Vector2.zero, DefenderRadius * 1.25f, kLineColor, Scale(0.05f), 28, 0f, 360f);
-            }
+            var fill = CreateDisc(slotRoot.transform, "Slot Fill", Vector2.zero, DefenderRadius * 2.45f, side == PlayerSide.Left ? new Color(kLeftColor.r, kLeftColor.g, kLeftColor.b, 0.16f) : new Color(kRightColor.r, kRightColor.g, kRightColor.b, 0.16f), 2);
+            var outline = CreateCircleLine(slotRoot.transform, "Slot Outline", Vector2.zero, DefenderRadius * 1.25f, kLineColor, Scale(0.05f), 28, 0f, 360f);
 
             var defender = new GameObject("Defender");
             defender.transform.SetParent(slotRoot.transform, false);
