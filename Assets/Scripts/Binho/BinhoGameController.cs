@@ -44,6 +44,7 @@ namespace BoardBinho
         private const float kBallRestVelocity = 0.35f;
         private const float kBallRestTime = 0.1f;
         private const float kGoalPauseDuration = 1.15f;
+        private const float kScoreDisplayDuration = 5f;
 
         private static readonly Color kFieldColor = new Color(0.09f, 0.35f, 0.18f);
         private static readonly Color kFieldInnerTint = new Color(0.13f, 0.42f, 0.23f);
@@ -79,6 +80,7 @@ namespace BoardBinho
         private int m_RightScore;
         private float m_BallStillTimer;
         private float m_GoalPauseTimer;
+        private float m_ScoreDisplayTimer;
         private bool m_DidPrepareInitialKickoff;
         private bool m_DidServeInitialKickoff;
         private float BaseFieldHalfWidth => kFieldWidth * 0.5f;
@@ -162,6 +164,11 @@ namespace BoardBinho
 
         private void Update()
         {
+            if (m_ScoreDisplayTimer > 0f)
+            {
+                m_ScoreDisplayTimer = Mathf.Max(0f, m_ScoreDisplayTimer - Time.deltaTime);
+            }
+
             UpdateDefenderPlacements();
             UpdateMatchPhaseFromPlacements();
             UpdateShotInput();
@@ -193,6 +200,11 @@ namespace BoardBinho
 
         private void OnGUI()
         {
+            if (m_ScoreDisplayTimer <= 0f)
+            {
+                return;
+            }
+
             var headerStyle = new GUIStyle(GUI.skin.label)
             {
                 alignment = TextAnchor.MiddleCenter,
@@ -201,21 +213,8 @@ namespace BoardBinho
                 normal = { textColor = Color.white },
             };
 
-            var bodyStyle = new GUIStyle(GUI.skin.label)
-            {
-                alignment = TextAnchor.MiddleCenter,
-                fontSize = Mathf.RoundToInt(Screen.height * 0.022f),
-                wordWrap = true,
-                normal = { textColor = new Color(1f, 1f, 1f, 0.92f) },
-            };
-
             var scoreText = $"Blue {m_LeftScore}  -  {m_RightScore} Orange";
             GUI.Label(new Rect(0f, 18f, Screen.width, 36f), scoreText, headerStyle);
-
-            GUI.Label(new Rect(0f, 58f, Screen.width, 30f), GetStatusMessage(), bodyStyle);
-
-            var placementText = $"Blue defenders: {CountOccupied(m_LeftSlots)}/{m_LeftSlots.Count}    Orange defenders: {CountOccupied(m_RightSlots)}/{m_RightSlots.Count}";
-            GUI.Label(new Rect(0f, Screen.height - 46f, Screen.width, 24f), placementText, bodyStyle);
         }
 
         private void EnsureRuntimeResources()
@@ -1081,6 +1080,7 @@ namespace BoardBinho
 
             m_Phase = MatchPhase.GoalPause;
             m_GoalPauseTimer = 0f;
+            m_ScoreDisplayTimer = kScoreDisplayDuration;
         }
 
         private void ResetBallToCenter()
@@ -1143,25 +1143,6 @@ namespace BoardBinho
             }
         }
 
-        private string GetStatusMessage()
-        {
-            switch (m_Phase)
-            {
-                case MatchPhase.Setup:
-                    return "Place " + kDefendersPerSide + " robot defenders anywhere on each team's half.";
-                case MatchPhase.ReadyToShoot:
-                    return GetTurnLabel() + " to shoot. Swipe across the ball in the direction you want it to travel; faster swipes hit harder.";
-                case MatchPhase.Aiming:
-                    return GetTurnLabel() + " is lining up the next flick.";
-                case MatchPhase.BallInMotion:
-                    return "Ball in play. The next player can flick as soon as it settles.";
-                case MatchPhase.GoalPause:
-                    return (m_LastScoringSide == PlayerSide.Left ? "Blue" : "Orange") + " scores!";
-                default:
-                    return string.Empty;
-            }
-        }
-
         private static float DistanceFromPointToSegment(Vector2 point, Vector2 segmentStart, Vector2 segmentEnd)
         {
             var segment = segmentEnd - segmentStart;
@@ -1175,11 +1156,6 @@ namespace BoardBinho
             projection = Mathf.Clamp01(projection);
             var closestPoint = segmentStart + (segment * projection);
             return Vector2.Distance(point, closestPoint);
-        }
-
-        private string GetTurnLabel()
-        {
-            return m_CurrentTurn == PlayerSide.Left ? "Blue" : "Orange";
         }
 
         private int CountOccupied(List<DefenderSlot> slots)
