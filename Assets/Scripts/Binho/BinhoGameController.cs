@@ -214,6 +214,11 @@ namespace BoardBinho
                 GUI.Label(new Rect(0f, 18f, Screen.width, 36f), scoreText, headerStyle);
             }
 
+            if (!ShouldShowSetupInstructions())
+            {
+                return;
+            }
+
             var bodyStyle = new GUIStyle(GUI.skin.label)
             {
                 alignment = TextAnchor.MiddleCenter,
@@ -226,6 +231,11 @@ namespace BoardBinho
 
             var placementText = $"Blue defenders: {CountOccupied(m_LeftSlots)}/{m_LeftSlots.Count}    Orange defenders: {CountOccupied(m_RightSlots)}/{m_RightSlots.Count}";
             GUI.Label(new Rect(0f, Screen.height - 46f, Screen.width, 24f), placementText, bodyStyle);
+        }
+
+        private bool ShouldShowSetupInstructions()
+        {
+            return !m_DidServeInitialKickoff;
         }
 
         private void EnsureRuntimeResources()
