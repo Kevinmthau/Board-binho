@@ -79,6 +79,7 @@ namespace BoardBinho
         private int m_RightScore;
         private float m_BallStillTimer;
         private float m_GoalPauseTimer;
+        private bool m_DidPrepareInitialKickoff;
         private bool m_DidServeInitialKickoff;
         private float BaseFieldHalfWidth => kFieldWidth * 0.5f;
         private float BaseFieldHalfHeight => kFieldHeight * 0.5f;
@@ -679,6 +680,12 @@ namespace BoardBinho
 
             activeGlyphs.Sort((left, right) => left.ContactId.CompareTo(right.ContactId));
 
+            if (m_Phase == MatchPhase.BallInMotion)
+            {
+                UpdateDefenderRemovalsDuringBallInMotion(activeGlyphs);
+                return;
+            }
+
             for (var i = 0; i < m_AllSlots.Count; i++)
             {
                 m_AllSlots[i].ContactId = -1;
@@ -691,6 +698,34 @@ namespace BoardBinho
             {
                 m_AllSlots[i].SetOccupied(m_AllSlots[i].ContactId >= 0);
             }
+        }
+
+        private void UpdateDefenderRemovalsDuringBallInMotion(List<ContactWorldState> activeGlyphs)
+        {
+            for (var i = 0; i < m_AllSlots.Count; i++)
+            {
+                var slot = m_AllSlots[i];
+                if (slot.ContactId < 0 || ContainsContact(activeGlyphs, slot.ContactId))
+                {
+                    continue;
+                }
+
+                slot.ContactId = -1;
+                slot.SetOccupied(false);
+            }
+        }
+
+        private static bool ContainsContact(List<ContactWorldState> contacts, int contactId)
+        {
+            for (var i = 0; i < contacts.Count; i++)
+            {
+                if (contacts[i].ContactId == contactId)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void AssignSlots(List<DefenderSlot> slots, List<ContactWorldState> contacts, PlayerSide side)
@@ -743,9 +778,9 @@ namespace BoardBinho
                 return;
             }
 
-            if (!m_DidServeInitialKickoff)
+            if (!m_DidPrepareInitialKickoff)
             {
-                m_DidServeInitialKickoff = true;
+                m_DidPrepareInitialKickoff = true;
                 ResetBallToCenter();
                 m_CurrentTurn = PlayerSide.Left;
             }
@@ -932,6 +967,7 @@ namespace BoardBinho
                 return;
             }
 
+            m_DidServeInitialKickoff = true;
             CancelActiveShot();
             m_BallBody.linearVelocity = Vector2.zero;
             m_BallBody.angularVelocity = 0f;
