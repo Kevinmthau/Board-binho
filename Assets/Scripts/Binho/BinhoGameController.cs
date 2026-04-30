@@ -19,7 +19,7 @@ namespace BoardBinho
         private const float kFieldBackgroundPixelHeight = 1080f;
         private const float kGoalMouthTopPixelY = 374f;
         private const float kGoalMouthBottomPixelY = 704f;
-        private const int kDefendersPerSide = 7;
+        private const int kDefendersPerSide = 8;
         private const float kOffBoardGoalClearance = 0.22f;
         private const float kFieldLineInset = 0.08f;
         private const float kWallThickness = 0.22f;
