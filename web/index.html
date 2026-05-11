@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>Board Binho Web</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <canvas id="game-canvas" aria-label="Board Binho playfield"></canvas>
+    <div id="hud" aria-live="polite">
+      <div id="score"></div>
+      <div id="status"></div>
+      <div id="setup"></div>
+    </div>
+    <div id="dev-controls">
+      <button id="auto-setup-button" type="button">Auto setup</button>
+      <button id="reset-button" type="button">Reset</button>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

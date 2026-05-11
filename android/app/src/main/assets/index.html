@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Board Web SDK Test</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 13px;
+    overflow: hidden;
+    display: flex;
+    height: 100vh;
+}
+
+/* Layout: sidebar tabs on left, touch canvas behind everything */
+#touch-canvas-container { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 0; }
+canvas { width: 100%; height: 100%; display: block; }
+
+#sidebar {
+    width: 460px; min-width: 460px;
+    display: flex; flex-direction: column;
+    background: rgba(22, 33, 62, 0.94);
+    border-right: 1px solid #333;
+    position: relative; z-index: 1;
+    overflow: hidden;
+}
+
+/* Tab bar */
+#tab-bar {
+    display: flex; gap: 0; border-bottom: 2px solid #00d2ff;
+    background: #0f1a30; flex-shrink: 0;
+}
+.tab {
+    padding: 8px 14px; cursor: pointer; font-weight: bold; font-size: 12px;
+    color: #667; border-bottom: 2px solid transparent; margin-bottom: -2px;
+    transition: color 0.15s;
+}
+.tab:hover { color: #aab; }
+.tab.active { color: #00d2ff; border-bottom-color: #00d2ff; }
+
+/* Tab content */
+.tab-content { display: none; flex: 1; overflow-y: auto; padding: 12px; }
+.tab-content.active { display: flex; flex-direction: column; gap: 10px; }
+
+/* Components */
+.section { background: #0f3460; border-radius: 6px; padding: 10px; }
+.section h3 { font-size: 13px; color: #00d2ff; margin-bottom: 6px; }
+.status-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 12px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+.dot.green { background: #00ff88; } .dot.red { background: #ff4444; } .dot.yellow { background: #ffaa00; }
+
+button {
+    background: #00d2ff; color: #1a1a2e; border: none; padding: 6px 12px;
+    border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px;
+}
+button:active { opacity: 0.7; }
+button.danger { background: #ff4466; color: white; }
+button.secondary { background: #445; color: #ddd; }
+
+.btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+#log {
+    font-family: monospace; font-size: 11px; background: #0a0a1a;
+    padding: 6px; border-radius: 4px; max-height: 250px; overflow-y: auto;
+    white-space: pre-wrap; word-break: break-all; flex-shrink: 0;
+}
+.log-info { color: #88aaff; } .log-ok { color: #00ff88; }
+.log-err { color: #ff6666; } .log-warn { color: #ffaa44; }
+
+.item-card {
+    background: #1a1a3e; padding: 6px 8px; border-radius: 4px; margin-top: 4px;
+    font-size: 11px;
+}
+.item-card .label { color: #00d2ff; font-weight: bold; }
+.item-card .detail { color: #999; }
+
+.avatar-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.avatar-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid #333; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+    <div id="tab-bar">
+        <div class="tab active" data-tab="status">Status</div>
+        <div class="tab" data-tab="touch">Touch</div>
+        <div class="tab" data-tab="session">Session</div>
+        <div class="tab" data-tab="saves">Saves</div>
+        <div class="tab" data-tab="avatar">Avatar</div>
+        <div class="tab" data-tab="overlay">Overlay</div>
+        <div class="tab" data-tab="log">Log</div>
+    </div>
+
+    <!-- STATUS TAB -->
+    <div id="tab-status" class="tab-content active">
+        <div class="section">
+            <h3>System Status</h3>
+            <div class="status-row"><span>Services</span><span id="s-services"><span class="dot yellow"></span>...</span></div>
+            <div class="status-row"><span>Session</span><span id="s-session"><span class="dot yellow"></span>...</span></div>
+            <div class="status-row"><span>Touch Channel</span><span id="s-touch"><span class="dot red"></span>Off</span></div>
+            <div class="status-row"><span>Touch FPS</span><span id="s-fps">--</span></div>
+            <div class="status-row"><span>Active Contacts</span><span id="s-contacts">0</span></div>
+        </div>
+        <div class="section">
+            <h3>Active Profile</h3>
+            <div id="active-profile">--</div>
+        </div>
+        <div class="section">
+            <h3>Storage Limits</h3>
+            <div id="storage-limits">--</div>
+        </div>
+    </div>
+
+    <!-- TOUCH TAB -->
+    <div id="tab-touch" class="tab-content">
+        <div class="section">
+            <h3>Touch Push Channel</h3>
+            <div class="btn-row">
+                <button onclick="subscribeTouchPush()">Subscribe</button>
+                <button onclick="unsubscribeTouchPush()" class="secondary">Unsubscribe</button>
+            </div>
+        </div>
+        <div class="section">
+            <h3>Polling (Snapshot)</h3>
+            <button onclick="pollTouchOnce()">Poll Once</button>
+        </div>
+        <div class="section">
+            <h3>Legend</h3>
+            <div style="font-size:11px; line-height:1.6">
+                Circle color = glyph ID (consistent per piece type)<br>
+                Large circle = piece (glyph), small = finger<br>
+                Thick border = piece is being touched<br>
+                Line = piece orientation
+            </div>
+        </div>
+    </div>
+
+    <!-- SESSION TAB -->
+    <div id="tab-session" class="tab-content">
+        <div class="section">
+            <h3>Players</h3>
+            <div class="btn-row">
+                <button onclick="refreshPlayers()">Refresh</button>
+                <button onclick="doAddGuest()">Add Guest</button>
+                <button onclick="doResetPlayers()" class="danger">Reset</button>
+            </div>
+            <div id="player-list"></div>
+        </div>
+        <div class="section">
+            <h3>Player Selector (OS Overlay)</h3>
+            <div class="btn-row">
+                <button onclick="doPresentAddPlayer()">Add Player</button>
+                <button onclick="doPresentReplacePlayer()">Replace Player</button>
+            </div>
+        </div>
+        <div class="section">
+            <h3>Active Profile</h3>
+            <button onclick="showActiveProfile()">Get Active Profile</button>
+            <div id="profile-detail"></div>
+        </div>
+    </div>
+
+    <!-- SAVES TAB -->
+    <div id="tab-saves" class="tab-content">
+        <div class="section">
+            <h3>Save Games</h3>
+            <div class="btn-grid">
+                <button onclick="doListSaves()">List All</button>
+                <button onclick="doCreateSave()">Create Normal</button>
+                <button onclick="doCreateSaveLarge()">Create 1MB</button>
+                <button onclick="doLoadLatest()">Load Latest</button>
+                <button onclick="doUpdateLatest()">Update Latest</button>
+                <button onclick="doDeleteLatest()" class="danger">Delete Latest</button>
+                <button onclick="doRemovePlayersLatest()">Remove Players</button>
+                <button onclick="doRemoveProfileLatest()">Remove Profile</button>
+                <button onclick="doLoadCoverLatest()">Load Cover Image</button>
+                <button onclick="showStorageLimits()">Storage Info</button>
+            </div>
+        </div>
+        <div class="section">
+            <h3>Save List</h3>
+            <div id="save-list"><span class="detail">Press "List All" to load</span></div>
+        </div>
+        <div class="section" id="cover-section" style="display:none">
+            <h3>Cover Image</h3>
+            <img id="cover-img" style="max-width:200px; border-radius:4px;">
+        </div>
+    </div>
+
+    <!-- AVATAR TAB -->
+    <div id="tab-avatar" class="tab-content">
+        <div class="section">
+            <h3>Load Avatars</h3>
+            <div class="btn-row">
+                <button onclick="loadAllAvatars()">Load All (1-8)</button>
+            </div>
+            <div class="btn-row" style="margin-top:6px">
+                <button onclick="loadAvatar(1)" class="secondary">1</button>
+                <button onclick="loadAvatar(2)" class="secondary">2</button>
+                <button onclick="loadAvatar(3)" class="secondary">3</button>
+                <button onclick="loadAvatar(4)" class="secondary">4</button>
+                <button onclick="loadAvatar(5)" class="secondary">5</button>
+                <button onclick="loadAvatar(6)" class="secondary">6</button>
+                <button onclick="loadAvatar(7)" class="secondary">7</button>
+                <button onclick="loadAvatar(8)" class="secondary">8</button>
+            </div>
+        </div>
+        <div class="section">
+            <h3>Loaded Avatars</h3>
+            <div id="avatar-gallery" class="avatar-row"></div>
+        </div>
+    </div>
+
+    <!-- OVERLAY TAB -->
+    <div id="tab-overlay" class="tab-content">
+        <div class="section">
+            <h3>Profile Switcher</h3>
+            <div class="btn-row">
+                <button onclick="doShowProfileSwitcher()">Show</button>
+                <button onclick="doHideProfileSwitcher()" class="secondary">Hide</button>
+            </div>
+        </div>
+        <div class="section">
+            <h3>Pause Screen</h3>
+            <div class="btn-grid">
+                <button onclick="doSetPauseContext()">Set Context</button>
+                <button onclick="doClearPauseContext()" class="secondary">Clear Context</button>
+                <button onclick="doPollPauseResult()">Poll Result</button>
+            </div>
+            <div id="pause-result" style="margin-top:6px"></div>
+        </div>
+    </div>
+
+    <!-- LOG TAB -->
+    <div id="tab-log" class="tab-content">
+        <div class="section" style="flex:1; display:flex; flex-direction:column">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px">
+                <h3>Log</h3>
+                <button onclick="clearLog()" class="secondary" style="font-size:11px; padding:3px 8px">Clear</button>
+            </div>
+            <div id="log" style="flex:1; max-height:none"></div>
+        </div>
+    </div>
+</div>
+
+<div id="touch-canvas-container">
+    <canvas id="touch-canvas"></canvas>
+</div>
+
+<script>
+// ============================================================
+// Tab navigation
+// ============================================================
+document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+    });
+});
+
+// ============================================================
+// Logging
+// ============================================================
+const logEl = document.getElementById('log');
+function log(msg, cls) {
+    const div = document.createElement('div');
+    div.className = cls || 'log-info';
+    div.textContent = new Date().toLocaleTimeString() + ' ' + msg;
+    logEl.appendChild(div);
+    logEl.scrollTop = logEl.scrollHeight;
+    while (logEl.children.length > 500) logEl.removeChild(logEl.firstChild);
+}
+function clearLog() { logEl.innerHTML = ''; }
+const HTML_ESCAPE = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => HTML_ESCAPE[c]);
+}
+
+// ============================================================
+// Async bridge
+// ============================================================
+window.__board = {
+    _pending: new Map(),
+    call(method, ...args) {
+        return new Promise((resolve, reject) => {
+            const id = BoardSDK[method](...args);
+            this._pending.set(id, { resolve, reject });
+        });
+    },
+    resolve(id, result) {
+        const p = this._pending.get(id);
+        if (p) { this._pending.delete(id); p.resolve(JSON.parse(result)); }
+    },
+    reject(id, error) {
+        const p = this._pending.get(id);
+        if (p) { this._pending.delete(id); p.reject(new Error(error)); }
+    }
+};
+
+// ============================================================
+// Touch push channel
+// ============================================================
+let touchFrameCount = 0;
+let lastFpsUpdate = performance.now();
+let currentContacts = [];
+const contactState = new Map();
+
+const GLYPH_COLORS = ['#888888','#ff4466','#00d2ff','#00ff88','#ffaa00','#aa66ff','#ff66cc','#66ffcc','#ffdd00'];
+function glyphColor(id) { return GLYPH_COLORS[id % GLYPH_COLORS.length] || '#fff'; }
+const PHASE_NAMES = ['none','began','moved','ended','canceled','stationary'];
+let touchMode = 'unknown'; // 'binary' or 'json'
+
+function parseBinaryFrame(buffer) {
+    const view = new DataView(buffer);
+    const count = view.getInt32(8, true);
+    const events = [];
+    for (let i = 0; i < count; i++) {
+        const off = 12 + i * 36;
+        events.push({
+            contactId:   view.getInt32(off, true),
+            positionX:   view.getFloat32(off + 4, true),
+            positionY:   view.getFloat32(off + 8, true),
+            orientation: view.getFloat32(off + 12, true),
+            typeId:      view.getInt32(off + 16, true),
+            phaseId:     view.getInt32(off + 20, true),
+            glyphId:     view.getInt32(off + 24, true),
+            isTouched:   view.getInt32(off + 28, true) === 1,
+        });
+    }
+    return events;
+}
+
+function parseJsonFrame(str) {
+    const frame = JSON.parse(str);
+    return (frame.c || []).map(c => ({
+        contactId: c.id, positionX: c.x, positionY: c.y,
+        orientation: c.o, typeId: c.t, phaseId: c.p,
+        glyphId: c.g, isTouched: c.touched === 1
+    }));
+}
+
+function subscribeTouchPush() {
+    if (!window.boardTouch) { log('boardTouch not available', 'log-err'); return; }
+    window.boardTouch.onmessage = function(event) {
+        let events;
+        if (event.data instanceof ArrayBuffer) {
+            if (touchMode !== 'binary') { touchMode = 'binary'; log('Touch mode: binary ArrayBuffer', 'log-ok'); }
+            events = parseBinaryFrame(event.data);
+        } else if (typeof event.data === 'string') {
+            if (touchMode !== 'json') { touchMode = 'json'; log('Touch mode: JSON string', 'log-ok'); }
+            try { events = parseJsonFrame(event.data); }
+            catch (e) { log('Bad frame: ' + e, 'log-err'); return; }
+        } else return;
+
+        const updatedIds = new Set();
+        for (const c of events) {
+            if (c.phaseId === 3 || c.phaseId === 4) { contactState.delete(c.contactId); }
+            else { contactState.set(c.contactId, c); updatedIds.add(c.contactId); }
+        }
+        for (const [id, c] of contactState) {
+            if (!updatedIds.has(id)) c.phaseId = 5;
+        }
+        currentContacts = Array.from(contactState.values());
+        touchFrameCount++;
+    };
+    window.boardTouch.postMessage('subscribe');
+    log('Subscribed to touch push channel', 'log-ok');
+    document.getElementById('s-touch').innerHTML = '<span class="dot green"></span>Push';
+}
+
+function unsubscribeTouchPush() {
+    if (window.boardTouch) window.boardTouch.postMessage('unsubscribe');
+    currentContacts = []; contactState.clear();
+    document.getElementById('s-touch').innerHTML = '<span class="dot red"></span>Off';
+    log('Unsubscribed');
+}
+
+function pollTouchOnce() {
+    try {
+        const contacts = JSON.parse(BoardSDK.getCurrentContacts());
+        log('Polled ' + contacts.length + ' contacts');
+        contacts.forEach(c => log('  id=' + c.contactId + ' (' + c.positionX.toFixed(0) + ',' + c.positionY.toFixed(0) + ') glyph=' + c.glyphId + ' phase=' + c.phaseId));
+    } catch (e) { log('Poll error: ' + e, 'log-err'); }
+}
+
+// ============================================================
+// Touch canvas
+// ============================================================
+const canvas = document.getElementById('touch-canvas');
+const ctx2d = canvas.getContext('2d');
+
+function resizeCanvas() {
+    const c = document.getElementById('touch-canvas-container');
+    canvas.width = c.clientWidth; canvas.height = c.clientHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+function drawTouchFrame() {
+    const w = canvas.width, h = canvas.height;
+    ctx2d.clearRect(0, 0, w, h);
+    ctx2d.strokeStyle = '#222244'; ctx2d.lineWidth = 1;
+    for (let x = 0; x < w; x += 100) { ctx2d.beginPath(); ctx2d.moveTo(x,0); ctx2d.lineTo(x,h); ctx2d.stroke(); }
+    for (let y = 0; y < h; y += 100) { ctx2d.beginPath(); ctx2d.moveTo(0,y); ctx2d.lineTo(w,y); ctx2d.stroke(); }
+
+    if (currentContacts.length === 0) {
+        ctx2d.fillStyle = '#444'; ctx2d.font = '18px sans-serif'; ctx2d.textAlign = 'center';
+        ctx2d.fillText('No touch contacts', w/2, h/2);
+    }
+
+    const scaleX = w / 1920, scaleY = h / 1080;
+    for (const c of currentContacts) {
+        const cx = c.positionX * scaleX, cy = c.positionY * scaleY;
+        const color = glyphColor(c.glyphId);
+        const isGlyph = c.glyphId !== 0;
+        const radius = isGlyph ? 60 : 30;
+        const lw = c.isTouched ? 4 : 2;
+
+        ctx2d.beginPath(); ctx2d.arc(cx, cy, radius, 0, Math.PI*2);
+        ctx2d.fillStyle = color + '33'; ctx2d.fill();
+        ctx2d.strokeStyle = color; ctx2d.lineWidth = lw; ctx2d.stroke();
+
+        if (isGlyph) {
+            const rad = (-c.orientation + 180 - 90) * Math.PI / 180;
+            ctx2d.beginPath(); ctx2d.moveTo(cx,cy);
+            ctx2d.lineTo(cx + Math.cos(rad)*radius*1.5, cy + Math.sin(rad)*radius*1.5);
+            ctx2d.strokeStyle = color; ctx2d.lineWidth = lw; ctx2d.stroke();
+        }
+
+        ctx2d.fillStyle = '#fff'; ctx2d.font = '12px monospace'; ctx2d.textAlign = 'left';
+        const lbl = isGlyph ? 'G'+c.glyphId : 'F';
+        const lx = cx+radius+8, ly = cy-12;
+        ctx2d.fillText(lbl+' #'+c.contactId+' '+PHASE_NAMES[c.phaseId], lx, ly);
+        if (isGlyph) ctx2d.fillText(c.orientation.toFixed(1)+'\u00B0'+(c.isTouched?' touched':''), lx, ly+15);
+    }
+    requestAnimationFrame(drawTouchFrame);
+}
+requestAnimationFrame(drawTouchFrame);
+
+// ============================================================
+// Session
+// ============================================================
+let guestCounter = 1;
+
+function refreshPlayers() {
+    try {
+        const players = JSON.parse(BoardSDK.getPlayers());
+        log('Players: ' + players.length, 'log-ok');
+        const el = document.getElementById('player-list');
+        el.innerHTML = '';
+        players.forEach((p, i) => {
+            log('  [' + i + '] ' + p.name + ' (sid=' + p.sessionId + ', type=' + p.type + ', avatar=' + p.avatarId + ')');
+            const sessionId = Number(p.sessionId);
+            const safeSessionId = Number.isFinite(sessionId) ? sessionId : 0;
+            el.innerHTML += '<div class="item-card"><span class="label">' + escapeHtml(p.name) + '</span> <span class="detail">sid=' + safeSessionId + ' ' + escapeHtml(p.type) + ' avatar=' + escapeHtml(p.avatarId) + '</span>' +
+                '<button onclick="doRemovePlayer(' + safeSessionId + ')" class="danger" style="float:right;font-size:10px;padding:2px 6px">Remove</button></div>';
+        });
+        if (players.length === 0) el.innerHTML = '<div class="detail">No players</div>';
+    } catch (e) { log('getPlayers error: ' + e, 'log-err'); }
+}
+
+function doAddGuest() {
+    try {
+        BoardSDK.addGuest(guestCounter++);
+        log('Added guest', 'log-ok');
+        refreshPlayers();
+    } catch (e) { log('addGuest error: ' + e, 'log-err'); }
+}
+
+function doRemovePlayer(sid) {
+    try {
+        BoardSDK.removePlayer(sid);
+        log('Removed player sid=' + sid, 'log-ok');
+        refreshPlayers();
+    } catch (e) { log('removePlayer error: ' + e, 'log-err'); }
+}
+
+function doResetPlayers() {
+    try {
+        const ok = BoardSDK.resetPlayers();
+        log('resetPlayers: ' + ok, ok ? 'log-ok' : 'log-err');
+        refreshPlayers();
+    } catch (e) { log('resetPlayers error: ' + e, 'log-err'); }
+}
+
+function showActiveProfile() {
+    try {
+        const json = BoardSDK.getActiveProfile();
+        const p = JSON.parse(json);
+        const el = document.getElementById('profile-detail');
+        if (p && p.name) {
+            log('Active profile: ' + p.name + ' (id=' + p.playerId + ', avatar=' + p.avatarId + ')', 'log-ok');
+            el.innerHTML = '<div class="item-card"><span class="label">' + escapeHtml(p.name) + '</span> <span class="detail">id=' + escapeHtml(p.playerId) + ' avatar=' + escapeHtml(p.avatarId) + '</span></div>';
+        } else {
+            log('No active profile', 'log-warn');
+            el.innerHTML = '<div class="detail">None</div>';
+        }
+    } catch (e) { log('getActiveProfile error: ' + e, 'log-err'); }
+}
+
+// ============================================================
+// Save Games
+// ============================================================
+let saveIds = [];
+
+async function doListSaves() {
+    try {
+        const saves = await window.__board.call('listSaves');
+        saveIds = saves.map(s => s.id);
+        log('Listed ' + saves.length + ' saves', 'log-ok');
+        const el = document.getElementById('save-list');
+        el.innerHTML = '';
+        saves.forEach((s, i) => {
+            log('  [' + i + '] "' + s.description + '" ' + (s.fileSize||0) + 'B v' + (s.gameVersion||'?') + ' players=' + (s.playerCount||0) + ' id=' + s.id);
+            el.innerHTML += '<div class="item-card"><span class="label">' + escapeHtml(s.description || '(no name)') + '</span><br>' +
+                '<span class="detail">' + (Number(s.fileSize)||0) + 'B | v' + escapeHtml(s.gameVersion || '?') + ' | ' + (Number(s.playerCount)||0) + ' players | ' + escapeHtml(new Date(s.createdAt).toLocaleString()) + '</span></div>';
+        });
+        if (saves.length === 0) el.innerHTML = '<div class="detail">No saves</div>';
+    } catch (e) { log('listSaves error: ' + e, 'log-err'); }
+}
+
+function generateTestData(size) {
+    const obj = {
+        setting: 'web-sdk-test',
+        timestamp: Date.now(),
+        levels: []
+    };
+    for (let i = 0; i < 10; i++) {
+        obj.levels.push({ id: i, score: Math.floor(Math.random() * 10000), completed: Math.random() > 0.5 });
+    }
+    let json = JSON.stringify(obj);
+    // Pad to desired size
+    if (size > json.length) {
+        json += 'X'.repeat(size - json.length);
+    }
+    return new TextEncoder().encode(json);
+}
+
+function bytesToBase64(bytes) {
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+}
+
+async function doCreateSave() {
+    try {
+        const data = generateTestData(1024);
+        const b64 = bytesToBase64(data);
+        const result = await window.__board.call('createSave', 'Web SDK Test ' + new Date().toLocaleTimeString(), b64, Math.floor(Math.random() * 100000), '1.0.0');
+        log('Created save: ' + JSON.stringify(result), 'log-ok');
+        doListSaves();
+    } catch (e) { log('createSave error: ' + e, 'log-err'); }
+}
+
+async function doCreateSaveLarge() {
+    try {
+        const data = generateTestData(1024 * 1024);
+        const b64 = bytesToBase64(data);
+        log('Creating 1MB save...', 'log-info');
+        const result = await window.__board.call('createSave', '1MB Test ' + new Date().toLocaleTimeString(), b64, Math.floor(Math.random() * 100000), '1.0.0');
+        log('Created 1MB save: ' + JSON.stringify(result), 'log-ok');
+        doListSaves();
+    } catch (e) { log('createSave (1MB) error: ' + e, 'log-err'); }
+}
+
+async function doLoadLatest() {
+    if (saveIds.length === 0) { log('No saves - list first', 'log-warn'); return; }
+    const id = saveIds[saveIds.length - 1];
+    try {
+        log('Loading save ' + id + '...', 'log-info');
+        const result = await window.__board.call('loadSave', id);
+        const decoded = atob(result.data);
+        log('Loaded ' + decoded.length + ' bytes. First 100: ' + decoded.substring(0, 100), 'log-ok');
+    } catch (e) { log('loadSave error: ' + e, 'log-err'); }
+}
+
+async function doUpdateLatest() {
+    if (saveIds.length === 0) { log('No saves - list first', 'log-warn'); return; }
+    const id = saveIds[saveIds.length - 1];
+    try {
+        const data = generateTestData(2048);
+        const b64 = bytesToBase64(data);
+        log('Updating save ' + id + '...', 'log-info');
+        const result = await window.__board.call('updateSave', id, 'Updated ' + new Date().toLocaleTimeString(), b64, Math.floor(Math.random() * 200000), '1.1.0');
+        log('Updated save: ' + result, 'log-ok');
+        doListSaves();
+    } catch (e) { log('updateSave error: ' + e, 'log-err'); }
+}
+
+async function doDeleteLatest() {
+    if (saveIds.length === 0) { log('No saves - list first', 'log-warn'); return; }
+    const id = saveIds[saveIds.length - 1];
+    try {
+        log('Deleting save ' + id + '...', 'log-info');
+        await window.__board.call('deleteSave', id);
+        log('Deleted save ' + id, 'log-ok');
+        doListSaves();
+    } catch (e) { log('deleteSave error: ' + e, 'log-err'); }
+}
+
+async function doRemovePlayersLatest() {
+    if (saveIds.length === 0) { log('No saves - list first', 'log-warn'); return; }
+    const id = saveIds[saveIds.length - 1];
+    try {
+        await window.__board.call('removePlayersFromSave', id);
+        log('Removed players from save ' + id, 'log-ok');
+        doListSaves();
+    } catch (e) { log('removePlayersFromSave error: ' + e, 'log-err'); }
+}
+
+async function doRemoveProfileLatest() {
+    if (saveIds.length === 0) { log('No saves - list first', 'log-warn'); return; }
+    const id = saveIds[saveIds.length - 1];
+    try {
+        await window.__board.call('removeActiveProfileFromSave', id);
+        log('Removed active profile from save ' + id, 'log-ok');
+        doListSaves();
+    } catch (e) { log('removeActiveProfileFromSave error: ' + e, 'log-err'); }
+}
+
+async function doLoadCoverLatest() {
+    if (saveIds.length === 0) { log('No saves - list first', 'log-warn'); return; }
+    const id = saveIds[saveIds.length - 1];
+    try {
+        log('Loading cover image for ' + id + '...', 'log-info');
+        const result = await window.__board.call('loadCoverImage', id);
+        if (!result.dataUri) {
+            log('No cover image for ' + id, 'log-warn');
+            document.getElementById('cover-section').style.display = 'none';
+            return;
+        }
+        log('Cover image loaded: ' + result.dataUri.substring(0, 60) + '...', 'log-ok');
+        document.getElementById('cover-img').src = result.dataUri;
+        document.getElementById('cover-section').style.display = '';
+    } catch (e) { log('loadCoverImage error: ' + e, 'log-err'); }
+}
+
+function showStorageLimits() {
+    try {
+        const maxData = BoardSDK.getMaxSaveDataSize();
+        const maxStorage = BoardSDK.getMaxAppStorageSize();
+        const maxDesc = BoardSDK.getMaxSaveDescriptionLength();
+        const msg = 'Max save: ' + (maxData/1024/1024).toFixed(1) + 'MB | Max total: ' + (maxStorage/1024/1024).toFixed(1) + 'MB | Max desc: ' + maxDesc + ' chars';
+        log(msg, 'log-ok');
+        document.getElementById('storage-limits').textContent = msg;
+    } catch (e) { log('Storage limits error: ' + e, 'log-err'); }
+}
+
+// ============================================================
+// Avatar
+// ============================================================
+async function loadAvatar(id) {
+    try {
+        log('Loading avatar ' + id + '...', 'log-info');
+        const result = await window.__board.call('loadAvatarPNG', id);
+        log('Avatar ' + id + ' loaded', 'log-ok');
+        const gallery = document.getElementById('avatar-gallery');
+        let img = document.getElementById('avatar-' + id);
+        if (!img) {
+            img = document.createElement('img');
+            img.id = 'avatar-' + id;
+            img.className = 'avatar-img';
+            img.title = 'Avatar ' + id;
+            gallery.appendChild(img);
+        }
+        img.src = result.dataUri;
+    } catch (e) { log('loadAvatarPNG error: ' + e, 'log-err'); }
+}
+
+async function loadAllAvatars() {
+    for (let i = 1; i <= 8; i++) await loadAvatar(i);
+}
+
+// ============================================================
+// Player Selector
+// ============================================================
+async function doPresentAddPlayer() {
+    try {
+        log('Presenting Add Player selector...', 'log-info');
+        const result = await window.__board.call('presentAddPlayerSelector');
+        log('Add Player result: ' + JSON.stringify(result), 'log-ok');
+        refreshPlayers();
+    } catch (e) { log('presentAddPlayerSelector error: ' + e, 'log-err'); }
+}
+
+async function doPresentReplacePlayer() {
+    try {
+        const players = JSON.parse(BoardSDK.getPlayers());
+        if (players.length === 0) { log('No players to replace', 'log-warn'); return; }
+        const sid = players[0].sessionId;
+        log('Presenting Replace Player selector for sid=' + sid + '...', 'log-info');
+        const result = await window.__board.call('presentReplacePlayerSelector', sid);
+        log('Replace Player result: ' + JSON.stringify(result), 'log-ok');
+        refreshPlayers();
+    } catch (e) { log('presentReplacePlayerSelector error: ' + e, 'log-err'); }
+}
+
+// ============================================================
+// System Overlay
+// ============================================================
+function doShowProfileSwitcher() {
+    try { BoardSDK.showProfileSwitcher(); log('Profile switcher shown', 'log-ok'); }
+    catch (e) { log('showProfileSwitcher error: ' + e, 'log-err'); }
+}
+
+function doHideProfileSwitcher() {
+    try { BoardSDK.hideProfileSwitcher(); log('Profile switcher hidden', 'log-ok'); }
+    catch (e) { log('hideProfileSwitcher error: ' + e, 'log-err'); }
+}
+
+// ============================================================
+// Pause Screen
+// ============================================================
+function doSetPauseContext() {
+    try {
+        const config = {
+            gameId: 'web-sdk-test',
+            gameName: 'Web SDK Test',
+            offerSaveOption: true,
+            customButtons: [
+                { id: 'restart', title: 'Restart', icon: 'circulararrow' },
+                { id: 'quit', title: 'Quit to Menu', icon: 'doorwitharrow' }
+            ],
+            audioTracks: [
+                { id: 'music', name: 'Music', value: 75 },
+                { id: 'sfx', name: 'Sound Effects', value: 85 }
+            ]
+        };
+        BoardSDK.setPauseContext(JSON.stringify(config));
+        log('Pause context set', 'log-ok');
+    } catch (e) { log('setPauseContext error: ' + e, 'log-err'); }
+}
+
+function doClearPauseContext() {
+    try { BoardSDK.clearPauseContext(); log('Pause context cleared', 'log-ok'); }
+    catch (e) { log('clearPauseContext error: ' + e, 'log-err'); }
+}
+
+function doPollPauseResult() {
+    try {
+        const json = BoardSDK.getPauseResult();
+        const el = document.getElementById('pause-result');
+        if (json === 'null') {
+            log('No pause result', 'log-info');
+            el.innerHTML = '<span class="detail">No result</span>';
+        } else {
+            const r = JSON.parse(json);
+            log('Pause result: ' + JSON.stringify(r), 'log-ok');
+            el.innerHTML = '<div class="item-card"><span class="label">' + escapeHtml(r.action) + '</span>' +
+                (r.customButtonId ? ' btn=' + escapeHtml(r.customButtonId) : '') + '</div>';
+        }
+    } catch (e) { log('getPauseResult error: ' + e, 'log-err'); }
+}
+
+// ============================================================
+// FPS counter
+// ============================================================
+setInterval(() => {
+    const now = performance.now();
+    const elapsed = (now - lastFpsUpdate) / 1000;
+    const fps = touchFrameCount / elapsed;
+    document.getElementById('s-fps').textContent = touchFrameCount > 0 ? fps.toFixed(0) + ' fps' : '--';
+    document.getElementById('s-contacts').textContent = currentContacts.length;
+    touchFrameCount = 0;
+    lastFpsUpdate = now;
+}, 2000);
+
+// ============================================================
+// Status polling
+// ============================================================
+function updateStatus() {
+    try {
+        const services = BoardSDK.areServicesReady();
+        const ready = BoardSDK.isReady();
+        const count = BoardSDK.getPlayerCount();
+        document.getElementById('s-services').innerHTML = services
+            ? '<span class="dot green"></span>Connected'
+            : '<span class="dot yellow"></span>Connecting...';
+        document.getElementById('s-session').innerHTML = ready
+            ? '<span class="dot green"></span>Ready (' + count + ' players)'
+            : '<span class="dot yellow"></span>Waiting...';
+
+        if (services) {
+            const prof = JSON.parse(BoardSDK.getActiveProfile());
+            if (prof && prof.name) {
+                document.getElementById('active-profile').textContent = prof.name + ' (avatar ' + prof.avatarId + ')';
+            }
+        }
+    } catch (e) {}
+}
+setInterval(updateStatus, 2000);
+
+// ============================================================
+// Init
+// ============================================================
+log('Board Web SDK Test loaded');
+log('BoardSDK: ' + (typeof BoardSDK !== 'undefined'), typeof BoardSDK !== 'undefined' ? 'log-ok' : 'log-err');
+log('boardTouch: ' + (typeof boardTouch !== 'undefined'), typeof boardTouch !== 'undefined' ? 'log-ok' : 'log-err');
+
+setTimeout(() => {
+    updateStatus();
+    refreshPlayers();
+    showStorageLimits();
+    if (window.boardTouch) subscribeTouchPush();
+}, 500);
+</script>
+</body>
+</html>

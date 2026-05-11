@@ -1,0 +1,88 @@
+plugins {
+    id 'com.android.application'
+}
+
+// URL selection for the harness WebView.
+//   ./gradlew assembleDebug                 -> loads the web build (default)
+//   ./gradlew assembleDebug -Pweb=raw       -> loads the raw-bridge tester
+//   ./gradlew assembleDebug -Pweb=web       -> loads the web build (explicit)
+def webTarget = (project.findProperty('web') ?: 'web').toString()
+def webUrl = webTarget == 'raw'
+        ? '/assets/index.html'
+        : '/assets/web/index.html'
+
+android {
+    namespace 'com.defaultcompany.boardbinhoweb'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.defaultcompany.boardbinhoweb'
+        minSdk 29
+        targetSdk 33
+        versionCode 1
+        versionName "1.0"
+        archivesBaseName = "BoardBinhoWeb"
+
+        ndk {
+            // The vendored Board WebView AAR currently ships arm64-v8a
+            // native bridge libraries only.
+            abiFilters 'arm64-v8a'
+        }
+
+        buildConfigField "String", "WEB_URL", "\"${webUrl}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+configurations.all {
+    resolutionStrategy {
+        force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
+        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
+    }
+}
+
+dependencies {
+    implementation(name: 'board-webview-general-debug', ext: 'aar')
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.webkit:webkit:1.8.0'
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.annotation:annotation:1.7.0'
+    implementation 'org.tensorflow:tensorflow-lite:2.14.0'
+    implementation 'org.tensorflow:tensorflow-lite-support:0.4.4'
+    implementation 'org.tensorflow:tensorflow-lite-metadata:0.4.4'
+}
+
+// Copy the web app's built output into the APK assets. The web app lives
+// in ../../web/ as a Vite project; run `npm install && npm run build` there
+// before building the APK (or set -Pweb=raw to skip this).
+task copyWebAssets(type: Copy) {
+    from '../../web/dist'
+    into 'src/main/assets/web'
+    doFirst {
+        if (!file('../../web/dist').exists()) {
+            throw new GradleException(
+                    "web/dist not found. Run: cd ../../web && npm install && npm run build\n" +
+                            "Or build the harness with -Pweb=raw to skip this step.")
+        }
+        delete 'src/main/assets/web'
+    }
+}
+
+if (webTarget == 'web') {
+    preBuild.dependsOn copyWebAssets
+}
