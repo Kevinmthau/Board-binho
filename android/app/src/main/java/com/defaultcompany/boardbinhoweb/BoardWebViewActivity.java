@@ -68,7 +68,7 @@ public class BoardWebViewActivity extends Activity {
         webView = new WebView(this);
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
-        WebView.setWebContentsDebuggingEnabled(true);
+        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
         setContentView(webView);
 
         WebViewAssetLoader assetLoader = new WebViewAssetLoader.Builder()

@@ -92,6 +92,14 @@ fi
 log "Building web app."
 (
     cd "$WEB_DIR"
+    if [[ ! -d node_modules ]]; then
+        log "Installing web dependencies."
+        if [[ -f package-lock.json ]]; then
+            npm ci
+        else
+            npm install
+        fi
+    fi
     npm run build
 )
 
