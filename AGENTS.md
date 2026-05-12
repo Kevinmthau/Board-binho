@@ -5,7 +5,7 @@ This repository is the **Board Web SDK** version of Board Binho.
 ## What to assume
 
 - This is a WebSDK Android/WebView project, not a Unity project.
-- The source Board Web SDK bundle lives at `/Users/kevinthau/board-websdk`.
+- The source Board Web SDK bundle lives at `/Users/kevinthau/board/board-websdk`.
 - The original Unity prototype lives at `/Users/kevinthau/Board-binho`.
 - Use `Board.input.subscribe(...)` for live contact frames.
 - Track physical piece instances by `contactId`, not `glyphId`.
@@ -19,6 +19,7 @@ This repository is the **Board Web SDK** version of Board Binho.
 - APK output: `Builds/Android/BoardBinhoWeb.apk`
 - Web app: `web/`
 - Android wrapper: `android/`
+- Shared SDK bundle: `/Users/kevinthau/board/board-websdk`
 - Current piece model: `android/app/src/main/assets/model.tflite`
 
 ## Build and deploy loop

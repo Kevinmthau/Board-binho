@@ -13,7 +13,7 @@ allprojects {
         google()
         mavenCentral()
         flatDir {
-            dirs 'libs'
+            dirs "$rootDir/../../../board-websdk/sample/app/libs"
         }
     }
 }

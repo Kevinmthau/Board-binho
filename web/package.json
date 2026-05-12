@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@harrishill/board-sdk": "file:../vendor/harrishill-board-sdk-0.1.0.tgz",
+    "@harrishill/board-sdk": "file:../../../board-websdk/harrishill-board-sdk-0.1.0.tgz",
     "@types/matter-js": "^0.20.2",
     "matter-js": "^0.20.0"
   },

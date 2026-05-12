@@ -8,8 +8,8 @@ wrapper.
 
 - `web/`: Vite + TypeScript game source.
 - `android/`: Android WebView wrapper with Board touch bridge integration.
-- `vendor/`: Local `@harrishill/board-sdk` npm tarball.
 - `Builds/Android/`: copied APK output from the project build helper.
+- Shared SDK bundle: `../../board-websdk/`.
 
 ## Identity
 
@@ -28,6 +28,8 @@ wrapper.
 
 The wrapper builds `web/dist`, packages it into Android assets, copies the debug
 APK to `Builds/Android/BoardBinhoWeb.apk`, and can install or launch with `bdb`.
+The web dependency and Android AAR resolve from the shared SDK bundle at
+`../../board-websdk/`.
 
 For browser-only iteration:
 

@@ -38,6 +38,6 @@ Outputs to `dist/`. `vite.config.ts` uses `base: "./"` so the built HTML works w
 
 ## Linking the SDK
 
-`package.json` references the SDK via `file:../vendor/harrishill-board-sdk-0.1.0.tgz`, so `npm install` uses the tarball in ../vendor.
+`package.json` references the SDK via `file:../../../board-websdk/harrishill-board-sdk-0.1.0.tgz`, so `npm install` uses the shared bundle in `../../board-websdk/`.
 
-If you're running this web app outside the scaffold, copy the tarball alongside it and update the relative `file:` path, or replace it with a published package version when one is available.
+If you're running this web app outside the Board workspace, copy the tarball alongside it and update the relative `file:` path, or replace it with a published package version when one is available.
