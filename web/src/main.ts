@@ -27,9 +27,19 @@ type DefenderSlot = {
   occupied: boolean;
 };
 
+type SwipeSample = {
+  position: Vec;
+  timestamp: number;
+};
+
 type SwipeContactState = {
+  samples: SwipeSample[];
   lastWorldPosition: Vec;
   lastTimestamp: number;
+  peakSpeed: number;
+  peakVelocity: Vec;
+  lastWindowedSpeed: number;
+  armedAt: number | null;
   hasLaunched: boolean;
 };
 
@@ -87,6 +97,9 @@ const MIN_SHOT_IMPULSE = 2.4;
 const MAX_SHOT_IMPULSE = 14.5;
 const BALL_REST_VELOCITY = 0.35;
 const BALL_REST_TIME = 0.1;
+const SWIPE_SAMPLE_WINDOW_SECONDS = 0.06;
+const SWIPE_LATCH_TIMEOUT_SECONDS = 0.016;
+const SWIPE_PEAK_HOLD_RATIO = 0.97;
 const GOAL_PAUSE_DURATION = 1.15;
 const SCORE_DISPLAY_DURATION = 5;
 const FIXED_STEP_MS = 1000 / 60;
@@ -221,11 +234,7 @@ function handleBoardFingerShotInput(fingers: ReadonlyArray<BoardContact>, now: n
     const existing = boardSwipeContacts.get(contact.contactId);
 
     if (!existing || contact.phase === BoardContactPhase.Began) {
-      boardSwipeContacts.set(contact.contactId, {
-        lastWorldPosition: worldPosition,
-        lastTimestamp: now,
-        hasLaunched: false,
-      });
+      boardSwipeContacts.set(contact.contactId, createSwipeContactState(worldPosition, now));
       continue;
     }
 
@@ -241,11 +250,10 @@ function wirePointerFallback(): void {
 
     if (!Board.isOnDevice && CanLaunchSwipe() && distance(worldPosition, getBallPosition()) <= layout.ballSwipeCaptureRadius) {
       canvas.setPointerCapture(event.pointerId);
-      pointerSwipeContacts.set(event.pointerId, {
-        lastWorldPosition: worldPosition,
-        lastTimestamp: performance.now() / 1000,
-        hasLaunched: false,
-      });
+      pointerSwipeContacts.set(
+        event.pointerId,
+        createSwipeContactState(worldPosition, performance.now() / 1000),
+      );
       event.preventDefault();
       return;
     }
@@ -300,35 +308,62 @@ function updateSwipeState(
   worldPosition: Vec,
   now: number,
 ): void {
-  if (swipeContact.hasLaunched || !CanLaunchSwipe()) {
-    contacts.set(contactId, {
-      ...swipeContact,
-      lastWorldPosition: worldPosition,
-      lastTimestamp: now,
-    });
-    return;
+  const readyToLaunch = !swipeContact.hasLaunched && CanLaunchSwipe();
+
+  if (readyToLaunch) {
+    recordSwipeSample(swipeContact, worldPosition, now);
+  } else {
+    resetSwipeSampler(swipeContact, worldPosition, now);
   }
 
-  if (
-    TryLaunchSwipe(
-      swipeContact,
-      worldPosition,
-      Math.max(now - swipeContact.lastTimestamp, 1 / 240),
-    )
-  ) {
-    contacts.set(contactId, {
-      lastWorldPosition: worldPosition,
-      lastTimestamp: now,
-      hasLaunched: true,
-    });
-    return;
+  swipeContact.lastWorldPosition = worldPosition;
+  swipeContact.lastTimestamp = now;
+
+  if (readyToLaunch && TryLaunchSwipe(swipeContact, now)) {
+    swipeContact.hasLaunched = true;
   }
 
-  contacts.set(contactId, {
-    ...swipeContact,
+  contacts.set(contactId, swipeContact);
+}
+
+function createSwipeContactState(worldPosition: Vec, now: number): SwipeContactState {
+  return {
+    samples: [{ position: worldPosition, timestamp: now }],
     lastWorldPosition: worldPosition,
     lastTimestamp: now,
-  });
+    peakSpeed: 0,
+    peakVelocity: { x: 0, y: 0 },
+    lastWindowedSpeed: 0,
+    armedAt: null,
+    hasLaunched: false,
+  };
+}
+
+function recordSwipeSample(state: SwipeContactState, position: Vec, timestamp: number): void {
+  state.samples.push({ position, timestamp });
+  const cutoff = timestamp - SWIPE_SAMPLE_WINDOW_SECONDS;
+  while (state.samples.length > 2 && state.samples[0].timestamp < cutoff) {
+    state.samples.shift();
+  }
+
+  const oldest = state.samples[0];
+  const newest = state.samples[state.samples.length - 1];
+  const windowDt = Math.max(newest.timestamp - oldest.timestamp, 1 / 240);
+  const windowDelta = subtract(newest.position, oldest.position);
+  const windowSpeed = magnitude(windowDelta) / windowDt;
+  state.lastWindowedSpeed = windowSpeed;
+  if (windowSpeed > state.peakSpeed) {
+    state.peakSpeed = windowSpeed;
+    state.peakVelocity = scaleVector(windowDelta, 1 / windowDt);
+  }
+}
+
+function resetSwipeSampler(state: SwipeContactState, position: Vec, timestamp: number): void {
+  state.samples = [{ position, timestamp }];
+  state.peakSpeed = 0;
+  state.peakVelocity = { x: 0, y: 0 };
+  state.lastWindowedSpeed = 0;
+  state.armedAt = null;
 }
 
 function frame(timestamp: number): void {
@@ -699,39 +734,56 @@ function CanLaunchSwipe(): boolean {
   return phase === "readyToShoot";
 }
 
-function TryLaunchSwipe(
-  swipeContact: SwipeContactState,
-  currentWorldPosition: Vec,
-  deltaTime: number,
-): boolean {
-  if (!CanLaunchSwipe() || !ballBody) {
+function TryLaunchSwipe(swipeContact: SwipeContactState, now: number): boolean {
+  if (!CanLaunchSwipe() || !ballBody || swipeContact.samples.length < 2) {
     return false;
   }
 
-  const swipeVector = subtract(currentWorldPosition, swipeContact.lastWorldPosition);
-  const swipeDistance = magnitude(swipeVector);
-  if (swipeDistance < layout.minSwipeTravelDistance) {
+  const samples = swipeContact.samples;
+  const oldest = samples[0];
+  const newest = samples[samples.length - 1];
+  const windowDelta = subtract(newest.position, oldest.position);
+  const windowDistance = magnitude(windowDelta);
+
+  if (windowDistance < layout.minSwipeTravelDistance) {
+    swipeContact.armedAt = null;
     return false;
   }
 
   if (
-    distanceFromPointToSegment(
-      getBallPosition(),
-      swipeContact.lastWorldPosition,
-      currentWorldPosition,
-    ) > layout.ballSwipeCaptureRadius
+    distanceFromPointToSegment(getBallPosition(), oldest.position, newest.position) >
+    layout.ballSwipeCaptureRadius
   ) {
+    swipeContact.armedAt = null;
     return false;
   }
 
-  const swipeSpeed = swipeDistance / Math.max(deltaTime, 1 / 240);
-  if (swipeSpeed < layout.minSwipeSpeed) {
+  const windowedSpeed = swipeContact.lastWindowedSpeed;
+  const triggerSpeed = Math.max(windowedSpeed, swipeContact.peakSpeed);
+  if (triggerSpeed < layout.minSwipeSpeed) {
+    swipeContact.armedAt = null;
     return false;
   }
 
-  const swipeStrength = inverseLerp(layout.minSwipeSpeed, layout.maxSwipeSpeed, swipeSpeed);
+  if (swipeContact.armedAt === null) {
+    swipeContact.armedAt = now;
+    return false;
+  }
+
+  const armedFor = now - swipeContact.armedAt;
+  const droppingFromPeak = windowedSpeed < swipeContact.peakSpeed * SWIPE_PEAK_HOLD_RATIO;
+  if (armedFor < SWIPE_LATCH_TIMEOUT_SECONDS && !droppingFromPeak) {
+    return false;
+  }
+
+  const direction =
+    swipeContact.peakSpeed > windowedSpeed
+      ? normalize(swipeContact.peakVelocity)
+      : normalize(windowDelta);
+
+  const swipeStrength = inverseLerp(layout.minSwipeSpeed, layout.maxSwipeSpeed, triggerSpeed);
   const impulseMagnitude = lerp(layout.minShotImpulse, layout.maxShotImpulse, swipeStrength);
-  LaunchShot(scaleVector(normalize(swipeVector), impulseMagnitude));
+  LaunchShot(scaleVector(direction, impulseMagnitude));
   return true;
 }
 
@@ -743,7 +795,11 @@ function LaunchShot(impulse: Vec): void {
   didServeInitialKickoff = true;
   CancelActiveShot();
   ballInPlay = true;
-  Matter.Body.setVelocity(ballBody, scaleVector(impulse, MATTER_SHOT_VELOCITY_SCALE));
+  const deltaV = scaleVector(impulse, MATTER_SHOT_VELOCITY_SCALE);
+  Matter.Body.setVelocity(ballBody, {
+    x: ballBody.velocity.x + deltaV.x,
+    y: ballBody.velocity.y + deltaV.y,
+  });
   Matter.Body.setAngularVelocity(ballBody, 0);
   phase = "ballInMotion";
   ballStillTimer = 0;
