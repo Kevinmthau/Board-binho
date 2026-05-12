@@ -73,7 +73,7 @@ const FIELD_BACKGROUND_ASPECT = 1920 / 1080;
 const GOAL_MOUTH_TOP_PIXEL_Y = 374;
 const GOAL_MOUTH_BOTTOM_PIXEL_Y = 704;
 const FIELD_BACKGROUND_PIXEL_HEIGHT = 1080;
-const DEFENDERS_PER_SIDE = 8;
+const DEFENDERS_PER_SIDE = 6;
 const OFF_BOARD_GOAL_CLEARANCE = 0.22;
 const WALL_THICKNESS = 0.22;
 const GOAL_DEPTH = 0.9;
@@ -885,7 +885,7 @@ function autoSetupDefenders(): void {
   simulatedContacts.clear();
   const leftXs = [-layout.pitchHalfWidth * 0.64, -layout.pitchHalfWidth * 0.34];
   const rightXs = [layout.pitchHalfWidth * 0.34, layout.pitchHalfWidth * 0.64];
-  const ys = [-layout.pitchHalfHeight * 0.58, -layout.pitchHalfHeight * 0.22, layout.pitchHalfHeight * 0.22, layout.pitchHalfHeight * 0.58];
+  const ys = [-layout.pitchHalfHeight * 0.58, 0, layout.pitchHalfHeight * 0.58];
 
   for (const x of leftXs) {
     for (const y of ys) {
