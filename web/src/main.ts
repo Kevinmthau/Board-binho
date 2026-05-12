@@ -203,16 +203,16 @@ function handleBoardContacts(contacts: ReadonlyArray<BoardContact>): void {
   const now = performance.now() / 1000;
 
   for (const contact of contacts) {
-    if (!isActiveContactPhase(contact.phase)) {
-      continue;
-    }
-
     if (contact.type === BoardContactType.Glyph) {
+      if (!isActiveContactPhase(contact.phase)) {
+        continue;
+      }
+
       latestBoardGlyphs.set(contact.contactId, {
         contactId: contact.contactId,
         worldPosition: screenToWorld({ x: contact.x, y: contact.y }),
       });
-    } else {
+    } else if (isSwipeContactPhase(contact.phase)) {
       fingerContacts.push(contact);
     }
   }
@@ -221,16 +221,26 @@ function handleBoardContacts(contacts: ReadonlyArray<BoardContact>): void {
 }
 
 function handleBoardFingerShotInput(fingers: ReadonlyArray<BoardContact>, now: number): void {
+  const activeFingerIds = fingers
+    .filter((contact) => isActiveContactPhase(contact.phase))
+    .map((contact) => contact.contactId);
+
   if (phase === "setup" || phase === "goalPause") {
-    pruneSwipeContactState(boardSwipeContacts, fingers.map((contact) => contact.contactId));
+    pruneSwipeContactState(boardSwipeContacts, activeFingerIds);
     return;
   }
 
   const seenFingerIds = new Set<number>();
 
   for (const contact of fingers) {
-    seenFingerIds.add(contact.contactId);
     const worldPosition = screenToWorld({ x: contact.x, y: contact.y });
+
+    if (contact.phase === BoardContactPhase.Ended) {
+      finishSwipeContact(boardSwipeContacts, contact.contactId, worldPosition, now);
+      continue;
+    }
+
+    seenFingerIds.add(contact.contactId);
     const existing = boardSwipeContacts.get(contact.contactId);
 
     if (!existing || contact.phase === BoardContactPhase.Began) {
@@ -293,7 +303,17 @@ function wirePointerFallback(): void {
   });
 
   const finishPointer = (event: PointerEvent): void => {
-    pointerSwipeContacts.delete(event.pointerId);
+    if (event.type === "pointerup") {
+      finishSwipeContact(
+        pointerSwipeContacts,
+        event.pointerId,
+        pointerWorldPosition(event),
+        performance.now() / 1000,
+      );
+    } else {
+      pointerSwipeContacts.delete(event.pointerId);
+    }
+
     pointerDefenderDrags.delete(event.pointerId);
   };
 
@@ -326,6 +346,32 @@ function updateSwipeState(
   contacts.set(contactId, swipeContact);
 }
 
+function finishSwipeContact(
+  contacts: Map<number, SwipeContactState>,
+  contactId: number,
+  worldPosition: Vec,
+  now: number,
+): void {
+  const swipeContact = contacts.get(contactId);
+  if (!swipeContact) {
+    return;
+  }
+
+  const readyToLaunch = !swipeContact.hasLaunched && CanLaunchSwipe();
+
+  if (readyToLaunch && swipeContact.armedAt === null) {
+    recordSwipeSample(swipeContact, worldPosition, now);
+    swipeContact.lastWorldPosition = worldPosition;
+    swipeContact.lastTimestamp = now;
+  }
+
+  if (readyToLaunch && TryLaunchSwipe(swipeContact, now, true)) {
+    swipeContact.hasLaunched = true;
+  }
+
+  contacts.delete(contactId);
+}
+
 function createSwipeContactState(worldPosition: Vec, now: number): SwipeContactState {
   return {
     samples: [{ position: worldPosition, timestamp: now }],
@@ -352,10 +398,6 @@ function recordSwipeSample(state: SwipeContactState, position: Vec, timestamp: n
   const windowDelta = subtract(newest.position, oldest.position);
   const windowSpeed = magnitude(windowDelta) / windowDt;
   state.lastWindowedSpeed = windowSpeed;
-  if (windowSpeed > state.peakSpeed) {
-    state.peakSpeed = windowSpeed;
-    state.peakVelocity = scaleVector(windowDelta, 1 / windowDt);
-  }
 }
 
 function resetSwipeSampler(state: SwipeContactState, position: Vec, timestamp: number): void {
@@ -364,6 +406,11 @@ function resetSwipeSampler(state: SwipeContactState, position: Vec, timestamp: n
   state.peakVelocity = { x: 0, y: 0 };
   state.lastWindowedSpeed = 0;
   state.armedAt = null;
+}
+
+function resetSwipePeak(state: SwipeContactState): void {
+  state.peakSpeed = 0;
+  state.peakVelocity = { x: 0, y: 0 };
 }
 
 function frame(timestamp: number): void {
@@ -734,7 +781,7 @@ function CanLaunchSwipe(): boolean {
   return phase === "readyToShoot";
 }
 
-function TryLaunchSwipe(swipeContact: SwipeContactState, now: number): boolean {
+function TryLaunchSwipe(swipeContact: SwipeContactState, now: number, launchArmed = false): boolean {
   if (!CanLaunchSwipe() || !ballBody || swipeContact.samples.length < 2) {
     return false;
   }
@@ -747,6 +794,7 @@ function TryLaunchSwipe(swipeContact: SwipeContactState, now: number): boolean {
 
   if (windowDistance < layout.minSwipeTravelDistance) {
     swipeContact.armedAt = null;
+    resetSwipePeak(swipeContact);
     return false;
   }
 
@@ -755,10 +803,17 @@ function TryLaunchSwipe(swipeContact: SwipeContactState, now: number): boolean {
     layout.ballSwipeCaptureRadius
   ) {
     swipeContact.armedAt = null;
+    resetSwipePeak(swipeContact);
     return false;
   }
 
+  const windowDt = Math.max(newest.timestamp - oldest.timestamp, 1 / 240);
   const windowedSpeed = swipeContact.lastWindowedSpeed;
+  if (windowedSpeed > swipeContact.peakSpeed) {
+    swipeContact.peakSpeed = windowedSpeed;
+    swipeContact.peakVelocity = scaleVector(windowDelta, 1 / windowDt);
+  }
+
   const triggerSpeed = Math.max(windowedSpeed, swipeContact.peakSpeed);
   if (triggerSpeed < layout.minSwipeSpeed) {
     swipeContact.armedAt = null;
@@ -767,12 +822,14 @@ function TryLaunchSwipe(swipeContact: SwipeContactState, now: number): boolean {
 
   if (swipeContact.armedAt === null) {
     swipeContact.armedAt = now;
-    return false;
+    if (!launchArmed) {
+      return false;
+    }
   }
 
   const armedFor = now - swipeContact.armedAt;
   const droppingFromPeak = windowedSpeed < swipeContact.peakSpeed * SWIPE_PEAK_HOLD_RATIO;
-  if (armedFor < SWIPE_LATCH_TIMEOUT_SECONDS && !droppingFromPeak) {
+  if (!launchArmed && armedFor < SWIPE_LATCH_TIMEOUT_SECONDS && !droppingFromPeak) {
     return false;
   }
 
@@ -1227,6 +1284,10 @@ function isActiveContactPhase(phaseValue: BoardContactPhase): boolean {
     phaseValue !== BoardContactPhase.Ended &&
     phaseValue !== BoardContactPhase.Canceled
   );
+}
+
+function isSwipeContactPhase(phaseValue: BoardContactPhase): boolean {
+  return isActiveContactPhase(phaseValue) || phaseValue === BoardContactPhase.Ended;
 }
 
 function pruneSwipeContactState(contacts: Map<number, SwipeContactState>, activeContactIds: number[]): void {
