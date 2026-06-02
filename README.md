@@ -22,7 +22,7 @@ wrapper.
 
 Download the latest debug APK from the GitHub release:
 
-https://github.com/Kevinmthau/Board-binho/releases/latest/download/board-binhoweb-debug.apk
+https://github.com/Kevinmthau/Board-binho/releases/latest/download/board-binho-web-debug.apk
 
 This APK is debug-signed for testing and local installation.
 
