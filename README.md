@@ -20,8 +20,11 @@ wrapper.
 
 ## Download APK
 
-Download the latest checked-in APK:
-[`Builds/Android/BoardBinhoWeb.apk`](Builds/Android/BoardBinhoWeb.apk).
+Download the latest debug APK from the GitHub release:
+
+https://github.com/Kevinmthau/Board-binho/releases/latest/download/board-binhoweb-debug.apk
+
+This APK is debug-signed for testing and local installation.
 
 ## Build And Install
 
