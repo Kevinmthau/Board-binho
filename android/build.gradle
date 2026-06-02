@@ -1,3 +1,7 @@
+def boardWebSdkDir = findProperty('boardWebSdkDir') ?:
+        System.getenv('BOARD_WEBSDK_DIR') ?:
+        "${System.getProperty('user.home')}/board/board-websdk"
+
 buildscript {
     repositories {
         google()
@@ -13,7 +17,7 @@ allprojects {
         google()
         mavenCentral()
         flatDir {
-            dirs "$rootDir/../../../board-websdk/sample/app/libs"
+            dirs "$boardWebSdkDir/sample/app/libs"
         }
     }
 }
