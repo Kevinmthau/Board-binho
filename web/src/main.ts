@@ -107,6 +107,8 @@ const BOUNDARY_RESTITUTION = 0.94;
 const DEFENDER_RESTITUTION = 0.94;
 const COLLISION_SEPARATION_EPSILON = 0.001;
 const FIELD_IMAGE_URL = "assets/field_background.png";
+const GOAL_CHEER_AUDIO_URL = "assets/crowd-cheer.mp3";
+const GOAL_CHEER_VOLUME = 0.85;
 const MATTER_SHOT_VELOCITY_SCALE = 0.035;
 
 const FIELD_EDGE_COLOR = "#071f0d";
@@ -150,6 +152,10 @@ fieldImage.onload = () => {
   fieldImageLoaded = true;
 };
 fieldImage.src = FIELD_IMAGE_URL;
+
+const goalCheerAudio = new Audio(GOAL_CHEER_AUDIO_URL);
+goalCheerAudio.preload = "auto";
+goalCheerAudio.volume = GOAL_CHEER_VOLUME;
 
 const leftSlots: DefenderSlot[] = [];
 const rightSlots: DefenderSlot[] = [];
@@ -968,6 +974,28 @@ function RegisterGoal(scorer: PlayerSide): void {
   phase = "goalPause";
   goalPauseTimer = 0;
   scoreDisplayTimer = SCORE_DISPLAY_DURATION;
+  playGoalCheer();
+}
+
+function playGoalCheer(): void {
+  try {
+    goalCheerAudio.pause();
+    goalCheerAudio.currentTime = 0;
+    void goalCheerAudio.play().catch(() => {
+      // Some browser previews can block audio until they receive a user gesture.
+    });
+  } catch {
+    // Audio support must never interrupt scoring or the next kickoff.
+  }
+}
+
+function stopGoalCheer(): void {
+  try {
+    goalCheerAudio.pause();
+    goalCheerAudio.currentTime = 0;
+  } catch {
+    // Reset the match even if this WebView cannot control media playback.
+  }
 }
 
 function ResetBallToCenter(): void {
@@ -998,6 +1026,7 @@ function CancelActiveShot(): void {
 }
 
 function resetMatch(): void {
+  stopGoalCheer();
   leftScore = 0;
   rightScore = 0;
   ballStillTimer = 0;
@@ -1497,6 +1526,7 @@ function renderUi(): void {
   setupEl.textContent = `Blue defenders: ${countOccupied(leftSlots)}/${leftSlots.length}    Orange defenders: ${countOccupied(rightSlots)}/${rightSlots.length}`;
   document.body.classList.toggle("show-score", scoreDisplayTimer > 0 || didServeInitialKickoff);
   document.body.classList.toggle("show-setup", shouldShowSetupInstructions());
+  document.body.classList.toggle("show-goal", phase === "goalPause");
 }
 
 function shouldShowSetupInstructions(): boolean {

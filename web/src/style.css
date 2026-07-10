@@ -107,6 +107,81 @@ body.show-setup #setup {
   opacity: 1;
 }
 
+#goal-banner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  color: #fff4a8;
+  font-size: clamp(72px, 17vw, 230px);
+  font-weight: 950;
+  letter-spacing: 0.01em;
+  line-height: 0.8;
+  text-align: center;
+  -webkit-text-stroke: clamp(2px, 0.45vw, 8px) #7a3d00;
+  text-shadow:
+    0 0 clamp(12px, 2.4vw, 34px) rgba(255, 190, 43, 0.9),
+    0 clamp(8px, 1.2vw, 18px) clamp(14px, 2vw, 28px) rgba(0, 0, 0, 0.55);
+  visibility: hidden;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.55);
+  will-change: opacity, transform;
+}
+
+body.show-goal #goal-banner {
+  visibility: visible;
+  animation: goal-flash 1.15s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes goal-flash {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.55);
+  }
+
+  14% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.14);
+  }
+
+  28% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(0.98);
+  }
+
+  48% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.03);
+  }
+
+  57% {
+    opacity: 0.28;
+  }
+
+  68% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.12);
+  }
+}
+
+@keyframes goal-fade {
+  0%,
+  82% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
 #dev-controls {
   position: fixed;
   right: 16px;
@@ -156,5 +231,11 @@ body.board-device #dev-controls {
     min-height: 36px;
     padding: 7px 10px;
     font-size: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.show-goal #goal-banner {
+    animation: goal-fade 1.15s ease-out both;
   }
 }

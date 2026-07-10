@@ -1,0 +1,11 @@
+Crowd cheer audio
+=================
+
+Source: "Crowd Cheer 5" by Krizin
+Source URL: https://freesound.org/people/Krizin/sounds/651646/
+License: Creative Commons CC0 1.0 Universal
+License URL: https://creativecommons.org/publicdomain/zero/1.0/
+
+The bundled crowd-cheer.mp3 is a 1.8-second excerpt of the source preview.
+It has been trimmed, normalized, and given short fade-in and fade-out ramps
+for use in Board Binho.
