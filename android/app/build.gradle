@@ -83,6 +83,15 @@ task copyWebAssets(type: Copy) {
     }
 }
 
+// The web app owns the Piece Set model. Keep the legacy Android wrapper
+// buildable without maintaining a second binary copy.
+task copyModelAsset(type: Copy) {
+    from '../../web/public/model.tflite'
+    into 'src/main/assets'
+}
+
+preBuild.dependsOn copyModelAsset
+
 if (webTarget == 'web') {
     preBuild.dependsOn copyWebAssets
 }

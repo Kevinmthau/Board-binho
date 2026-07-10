@@ -1,43 +1,29 @@
-# Board Binho Web
+# Board Binho Web App
 
-Minimal Vite + TypeScript scaffold demonstrating the Board Web SDK. Each subsystem (input, session, save, pause) is wired up in a small readable chunk in `src/main.ts` so you can use it as a reference.
+This directory contains the Vite and TypeScript game source.
 
-## Run it
+## Browser Preview
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
-Opens at <http://localhost:5173>. Off-device the status panel renders `isOnDevice: false` and the interactive sections are disabled — which is expected. This mode is useful for styling, wiring up UI, and syntax-checking your SDK calls.
+`Board.isOnDevice` remains false in the browser. Simulated defenders and
+pointer swipes provide preview input without faking the Board bridge.
 
-## Run it against a real bridge
+## Board Package
 
-The SDK bridge (`window.BoardSDK` / `window.boardTouch`) only exists inside a Board WebView. Two ways to get one on your dev machine:
-
-1. **Android wrapper (in this project).** Build this web app (`npm run build`), then run `cd ../android && ./gradlew assembleDebug`. The Gradle task copies `dist/` into `android/app/src/main/assets/web/`, which is the default Android asset path. The native bridge is arm64-only, so install the APK on an arm64 Android device or arm64 emulator image, not the default x86_64 emulator.
-2. **A real Board device.** Serve the built `dist/` from anywhere, point the device's browser or WebView host app at the URL.
-
-## Build
+Run the repository build script from the project root:
 
 ```bash
-npm run build
+./scripts/build_webapp.sh
 ```
 
-Outputs to `dist/`. `vite.config.ts` uses `base: "./"` so the built HTML works whether it's loaded via `file://` from Android assets or served from any subpath.
+It builds this directory, includes `public/model.tflite`, and writes
+`Builds/Web/<appId>.webapp.zip`. The relative Vite base must remain `./` so
+assets resolve from the Board bundle root.
 
-## What's in `src/main.ts`
-
-| Section | Shows |
-|---|---|
-| `renderStatus()` | Reading `Board.isOnDevice`, `Board.sdkVersion`, `Board.bridgeVersion`. |
-| `wireTouchCanvas()` | Subscribing to `Board.input`, drawing finger + piece contacts, using orientation. |
-| `wireSession()` | Listing players, presenting the add-player selector, opening the profile switcher. |
-| `wireSaves()` | Listing saves, creating a throwaway save with `TextEncoder`. |
-| `wirePauseMenu()` | Configuring the system pause menu with custom buttons and audio tracks, polling for results. |
-
-## Linking the SDK
-
-`package.json` references the SDK via `file:../../../board-websdk/harrishill-board-sdk-0.1.0.tgz`, so `npm install` uses the shared bundle in `../../board-websdk/`.
-
-If you're running this web app outside the Board workspace, copy the tarball alongside it and update the relative `file:` path, or replace it with a published package version when one is available.
+The Board Studio SDK payload is vendored at
+`../vendor/board.fun-web-sdk-1.0.0-beta.6.tgz` and installed as
+`@board.fun/web-sdk`.

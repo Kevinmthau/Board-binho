@@ -3,7 +3,7 @@ import {
   BoardContactPhase,
   BoardContactType,
   type BoardContact,
-} from "@harrishill/board-sdk";
+} from "@board.fun/web-sdk";
 import Matter from "matter-js";
 
 type Vec = {
