@@ -1,7 +1,6 @@
 import {
   Board,
   BoardContactPhase,
-  BoardContactType,
   type BoardContact,
 } from "@board.fun/web-sdk";
 import Matter from "matter-js";
@@ -103,6 +102,8 @@ const SWIPE_PEAK_HOLD_RATIO = 0.97;
 const GOAL_PAUSE_DURATION = 1.15;
 const SCORE_DISPLAY_DURATION = 5;
 const FIXED_STEP_MS = 1000 / 60;
+const PHYSICS_SUBSTEPS = 4;
+const BOUNDARY_RESTITUTION = 0.94;
 const FIELD_IMAGE_URL = "assets/field_background.png";
 const MATTER_SHOT_VELOCITY_SCALE = 0.035;
 
@@ -203,7 +204,7 @@ function handleBoardContacts(contacts: ReadonlyArray<BoardContact>): void {
   const now = performance.now() / 1000;
 
   for (const contact of contacts) {
-    if (contact.type === BoardContactType.Glyph) {
+    if (contact.glyphId > 0) {
       if (!isActiveContactPhase(contact.phase)) {
         continue;
       }
@@ -233,14 +234,19 @@ function handleBoardFingerShotInput(fingers: ReadonlyArray<BoardContact>, now: n
   const seenFingerIds = new Set<number>();
 
   for (const contact of fingers) {
-    const worldPosition = screenToWorld({ x: contact.x, y: contact.y });
+    if (contact.phase === BoardContactPhase.Canceled) {
+      boardSwipeContacts.delete(contact.contactId);
+      continue;
+    }
 
     if (contact.phase === BoardContactPhase.Ended) {
+      const worldPosition = screenToWorld({ x: contact.x, y: contact.y });
       finishSwipeContact(boardSwipeContacts, contact.contactId, worldPosition, now);
       continue;
     }
 
     seenFingerIds.add(contact.contactId);
+    const worldPosition = screenToWorld({ x: contact.x, y: contact.y });
     const existing = boardSwipeContacts.get(contact.contactId);
 
     if (!existing || contact.phase === BoardContactPhase.Began) {
@@ -251,6 +257,8 @@ function handleBoardFingerShotInput(fingers: ReadonlyArray<BoardContact>, now: n
     updateSwipeState(boardSwipeContacts, contact.contactId, existing, worldPosition, now);
   }
 
+  // Absence from the SDK snapshot does not distinguish Ended from Canceled.
+  // Only an explicit Ended phase may complete an armed swipe.
   pruneSwipeContactState(boardSwipeContacts, Array.from(seenFingerIds));
 }
 
@@ -455,12 +463,23 @@ function fixedStep(deltaSeconds: number): void {
   }
 
   if (phase !== "setup" && ballInPlay) {
-    Matter.Engine.update(engine, FIXED_STEP_MS);
-    constrainBallSpeed();
+    for (let step = 0; step < PHYSICS_SUBSTEPS; step += 1) {
+      const incomingVelocity = ballBody
+        ? { ...Matter.Body.getVelocity(ballBody) }
+        : null;
+      Matter.Engine.update(engine, FIXED_STEP_MS / PHYSICS_SUBSTEPS);
+      constrainBallSpeed();
+      ConstrainBallToPlayfield(incomingVelocity);
+      CheckForGoal();
+
+      if (!ballInPlay) {
+        return;
+      }
+    }
+
     updateBallTrail();
   }
 
-  CheckForGoal();
   UpdateBallMotionState(deltaSeconds);
 }
 
@@ -911,10 +930,7 @@ function CheckForGoal(): void {
   }
 
   const position = getBallPosition();
-  if (
-    position.y > layout.goalMouthTopY - layout.uniformScale * 0.05 ||
-    position.y < layout.goalMouthBottomY + layout.uniformScale * 0.05
-  ) {
+  if (!IsPositionInsideGoalMouth(position)) {
     return;
   }
 
@@ -923,6 +939,14 @@ function CheckForGoal(): void {
   } else if (position.x >= layout.goalScoreLineX) {
     RegisterGoal("left");
   }
+}
+
+function IsPositionInsideGoalMouth(position: Vec): boolean {
+  const goalPostClearance = layout.uniformScale * 0.05;
+  return (
+    position.y <= layout.goalMouthTopY - goalPostClearance &&
+    position.y >= layout.goalMouthBottomY + goalPostClearance
+  );
 }
 
 function RegisterGoal(scorer: PlayerSide): void {
@@ -1118,6 +1142,53 @@ function constrainBallSpeed(): void {
   Matter.Body.setVelocity(ballBody, scaleVector(normalize(velocity), maxSpeed));
 }
 
+function ConstrainBallToPlayfield(incomingVelocity: Vec | null): void {
+  if (!ballBody || !incomingVelocity) {
+    return;
+  }
+
+  const position = getBallPosition();
+  const velocity = Matter.Body.getVelocity(ballBody);
+  const correctedPosition = { ...position };
+  const correctedVelocity = { x: velocity.x, y: velocity.y };
+  const maxBallX = layout.pitchHalfWidth - layout.ballRadius;
+  const maxBallY = layout.pitchHalfHeight - layout.ballRadius;
+
+  if (correctedPosition.y > maxBallY) {
+    correctedPosition.y = maxBallY;
+    if (incomingVelocity.y > 0) {
+      correctedVelocity.y = -incomingVelocity.y * BOUNDARY_RESTITUTION;
+    }
+  } else if (correctedPosition.y < -maxBallY) {
+    correctedPosition.y = -maxBallY;
+    if (incomingVelocity.y < 0) {
+      correctedVelocity.y = -incomingVelocity.y * BOUNDARY_RESTITUTION;
+    }
+  }
+
+  if (!IsPositionInsideGoalMouth(correctedPosition)) {
+    if (correctedPosition.x > maxBallX) {
+      correctedPosition.x = maxBallX;
+      if (incomingVelocity.x > 0) {
+        correctedVelocity.x = -incomingVelocity.x * BOUNDARY_RESTITUTION;
+      }
+    } else if (correctedPosition.x < -maxBallX) {
+      correctedPosition.x = -maxBallX;
+      if (incomingVelocity.x < 0) {
+        correctedVelocity.x = -incomingVelocity.x * BOUNDARY_RESTITUTION;
+      }
+    }
+  }
+
+  if (correctedPosition.x !== position.x || correctedPosition.y !== position.y) {
+    Matter.Body.setPosition(ballBody, correctedPosition);
+  }
+
+  if (correctedVelocity.x !== velocity.x || correctedVelocity.y !== velocity.y) {
+    Matter.Body.setVelocity(ballBody, correctedVelocity);
+  }
+}
+
 function render(): void {
   ctx.clearRect(0, 0, layout.cssWidth, layout.cssHeight);
   ctx.fillStyle = BACKGROUND_COLOR;
@@ -1287,7 +1358,11 @@ function isActiveContactPhase(phaseValue: BoardContactPhase): boolean {
 }
 
 function isSwipeContactPhase(phaseValue: BoardContactPhase): boolean {
-  return isActiveContactPhase(phaseValue) || phaseValue === BoardContactPhase.Ended;
+  return (
+    isActiveContactPhase(phaseValue) ||
+    phaseValue === BoardContactPhase.Ended ||
+    phaseValue === BoardContactPhase.Canceled
+  );
 }
 
 function pruneSwipeContactState(contacts: Map<number, SwipeContactState>, activeContactIds: number[]): void {
