@@ -6,3 +6,4 @@ local.properties
 # Generated at build time by the copyWebAssets Gradle task.
 # The source of truth is ../web/ and its npm-built dist/ folder.
 app/src/main/assets/web/
+app/src/main/assets/model.tflite

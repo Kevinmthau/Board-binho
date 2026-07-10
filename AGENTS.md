@@ -1,12 +1,11 @@
 # AGENTS.md
 
-This repository is the **Board Web SDK** version of Board Binho.
+This repository is the **Board Web App** version of Board Binho.
 
 ## What to assume
 
-- This is a WebSDK Android/WebView project, not a Unity project.
-- The source Board Web SDK bundle lives at `/Users/kevinthau/board/board-websdk`.
-- The original Unity prototype lives at `/Users/kevinthau/Board-binho`.
+- This is a Vite/TypeScript Board Web SDK game packaged as `.webapp.zip`.
+- The Android wrapper is legacy compatibility code, not the primary build.
 - Use `Board.input.subscribe(...)` for live contact frames.
 - Track physical piece instances by `contactId`, not `glyphId`.
 - Treat `glyphId` as a piece type identifier only.
@@ -14,30 +13,35 @@ This repository is the **Board Web SDK** version of Board Binho.
 
 ## Project identity
 
-- Android package id: `com.defaultcompany.boardbinhoweb`
-- Board app id: `board-binhoweb`
-- APK output: `Builds/Android/BoardBinhoWeb.apk`
-- Web app: `web/`
-- Android wrapper: `android/`
-- Shared SDK bundle: `/Users/kevinthau/board/board-websdk`
-- Current piece model: `android/app/src/main/assets/model.tflite`
+- Package id: `com.defaultcompany.boardbinhoweb`
+- Board app id: persisted in `board.config.json` after the first pack.
+- Web app output: `Builds/Web/<appId>.webapp.zip`
+- Web app source: `web/`
+- Vendored SDK: `vendor/board.fun-web-sdk-1.0.0-beta.6.tgz`
+- SDK source: `/Users/kevinthau/Board Studio/board.fun-web-sdk-1.0.0-beta.6.tgz`
+- Piece model: `web/public/model.tflite`
+- Legacy Android wrapper: `android/`
 
 ## Build and deploy loop
 
-Prefer:
+Build and pack locally:
 
 ```bash
-./scripts/build_android.sh --install
+./scripts/build_webapp.sh
 ```
 
-Use `--launch` to install and start the app:
+Install or install and launch on a paired Board:
 
 ```bash
-./scripts/build_android.sh --launch
+./scripts/build_webapp.sh --install
+./scripts/build_webapp.sh --launch
 ```
 
-The script resolves `bdb` from `BDB_BIN`, `PATH`, `Tools/bdb`, `$HOME/Desktop/bdb`,
-and `$HOME/Documents/bdb`.
+The script uses `web-pack` to create the bundle and `board-connect` for device
+installation. Override them with `WEB_PACK_BIN` or `BOARD_CONNECT_BIN`.
+
+Refresh the vendored SDK from Board Studio with its `update-game-sdk.sh`
+workflow, passing `--pack-only` when no device deployment is requested.
 
 ## Browser loop
 
