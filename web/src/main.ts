@@ -104,6 +104,8 @@ const SCORE_DISPLAY_DURATION = 5;
 const FIXED_STEP_MS = 1000 / 60;
 const PHYSICS_SUBSTEPS = 4;
 const BOUNDARY_RESTITUTION = 0.94;
+const DEFENDER_RESTITUTION = 0.94;
+const COLLISION_SEPARATION_EPSILON = 0.001;
 const FIELD_IMAGE_URL = "assets/field_background.png";
 const MATTER_SHOT_VELOCITY_SCALE = 0.035;
 
@@ -468,6 +470,7 @@ function fixedStep(deltaSeconds: number): void {
         ? { ...Matter.Body.getVelocity(ballBody) }
         : null;
       Matter.Engine.update(engine, FIXED_STEP_MS / PHYSICS_SUBSTEPS);
+      ResolveBallDefenderCollisions(incomingVelocity);
       constrainBallSpeed();
       ConstrainBallToPlayfield(incomingVelocity);
       CheckForGoal();
@@ -755,7 +758,7 @@ function syncSlotBody(slot: DefenderSlot): void {
     slot.body = Matter.Bodies.circle(slot.position.x, slot.position.y, layout.defenderRadius, {
       label: "defender",
       isStatic: true,
-      restitution: 0.94,
+      restitution: DEFENDER_RESTITUTION,
       friction: 0.05,
       frictionStatic: 0,
     });
@@ -1140,6 +1143,224 @@ function constrainBallSpeed(): void {
   }
 
   Matter.Body.setVelocity(ballBody, scaleVector(normalize(velocity), maxSpeed));
+}
+
+function ResolveBallDefenderCollisions(incomingVelocity: Vec | null): void {
+  if (!ballBody || !incomingVelocity) {
+    return;
+  }
+
+  // Matter's resting threshold suppresses restitution at this game's small world scale.
+  const ballPosition = getBallPosition();
+  const collisionRadius = layout.ballRadius + layout.defenderRadius;
+  const separationRadius = collisionRadius + layout.uniformScale * COLLISION_SEPARATION_EPSILON;
+  const defenderCenters: Vec[] = [];
+  let manifoldNormalSum: Vec = { x: 0, y: 0 };
+
+  for (const slot of allSlots) {
+    if (!slot.occupied || !slot.body) {
+      continue;
+    }
+
+    const center = { x: slot.body.position.x, y: slot.body.position.y };
+    defenderCenters.push(center);
+    const centerToBall = subtract(ballPosition, center);
+    const centerDistance = magnitude(centerToBall);
+    if (centerDistance > collisionRadius) {
+      continue;
+    }
+
+    const normal = centerDistance > Number.EPSILON
+      ? scaleVector(centerToBall, 1 / centerDistance)
+      : scaleVector(normalize(incomingVelocity), -1);
+    const normalVelocity = dot(incomingVelocity, normal);
+    if (normalVelocity >= 0) {
+      continue;
+    }
+
+    // Weight each simultaneous contact by its closing speed. This preserves a
+    // symmetric manifold normal regardless of defender slot order.
+    manifoldNormalSum = add(manifoldNormalSum, scaleVector(normal, -normalVelocity));
+  }
+
+  const manifoldNormal = normalize(manifoldNormalSum);
+  if (magnitude(manifoldNormal) <= Number.EPSILON) {
+    return;
+  }
+
+  const separationDistance = FindDefenderManifoldExitDistance(
+    ballPosition,
+    manifoldNormal,
+    defenderCenters,
+    separationRadius,
+  );
+  const separatedPosition = add(ballPosition, scaleVector(manifoldNormal, separationDistance));
+  Matter.Body.setPosition(ballBody, separatedPosition);
+
+  const contactTolerance = Math.max(separationRadius * 1e-7, Number.EPSILON * 100);
+  const contactNormals = defenderCenters.flatMap((center) => {
+    const centerToBall = subtract(separatedPosition, center);
+    const centerDistance = magnitude(centerToBall);
+    return Math.abs(centerDistance - separationRadius) <= contactTolerance
+      ? [scaleVector(centerToBall, 1 / centerDistance)]
+      : [];
+  });
+
+  Matter.Body.setVelocity(
+    ballBody,
+    ResolveDefenderManifoldVelocity(incomingVelocity, contactNormals, manifoldNormal),
+  );
+}
+
+function FindDefenderManifoldExitDistance(
+  position: Vec,
+  direction: Vec,
+  defenderCenters: Vec[],
+  collisionRadius: number,
+): number {
+  const intervals: Array<{ start: number; end: number }> = [];
+  const radiusSquared = collisionRadius * collisionRadius;
+
+  for (const center of defenderCenters) {
+    const centerToPosition = subtract(position, center);
+    const projectedDistance = dot(centerToPosition, direction);
+    const perpendicularDistanceSquared = Math.max(
+      0,
+      dot(centerToPosition, centerToPosition) - projectedDistance * projectedDistance,
+    );
+    if (perpendicularDistanceSquared > radiusSquared) {
+      continue;
+    }
+
+    const halfInterval = Math.sqrt(Math.max(0, radiusSquared - perpendicularDistanceSquared));
+    const start = -projectedDistance - halfInterval;
+    const end = -projectedDistance + halfInterval;
+    if (end >= 0) {
+      intervals.push({ start, end });
+    }
+  }
+
+  intervals.sort((left, right) => left.start - right.start || left.end - right.end);
+
+  let foundContainingInterval = false;
+  let blockedUntil = 0;
+  for (const interval of intervals) {
+    if (!foundContainingInterval) {
+      if (interval.start <= 0 && interval.end >= 0) {
+        foundContainingInterval = true;
+        blockedUntil = interval.end;
+      }
+      continue;
+    }
+
+    if (interval.start > blockedUntil) {
+      break;
+    }
+    blockedUntil = Math.max(blockedUntil, interval.end);
+  }
+
+  return foundContainingInterval ? blockedUntil : 0;
+}
+
+function ResolveDefenderManifoldVelocity(
+  incomingVelocity: Vec,
+  contactNormals: Vec[],
+  fallbackNormal: Vec,
+): Vec {
+  const constraints = contactNormals.map((normal) => {
+    const normalVelocity = dot(incomingVelocity, normal);
+    return {
+      normal,
+      minimumVelocity: normalVelocity < 0 ? -DEFENDER_RESTITUTION * normalVelocity : 0,
+    };
+  });
+  if (constraints.length > 0) {
+    const resolvedVelocity = FindClosestVelocitySatisfyingConstraints(incomingVelocity, constraints);
+    if (resolvedVelocity) {
+      return resolvedVelocity;
+    }
+
+    // Degenerate contact wedges may not permit every restitution target. They
+    // must still prevent the ball from moving back into any touching defender.
+    const nonPenetratingVelocity = FindClosestVelocitySatisfyingConstraints(
+      incomingVelocity,
+      constraints.map(({ normal }) => ({ normal, minimumVelocity: 0 })),
+    );
+    if (nonPenetratingVelocity) {
+      return nonPenetratingVelocity;
+    }
+  }
+
+  const fallbackNormalVelocity = dot(incomingVelocity, fallbackNormal);
+  return fallbackNormalVelocity < 0
+    ? subtract(
+        incomingVelocity,
+        scaleVector(fallbackNormal, (1 + DEFENDER_RESTITUTION) * fallbackNormalVelocity),
+      )
+    : incomingVelocity;
+}
+
+function FindClosestVelocitySatisfyingConstraints(
+  incomingVelocity: Vec,
+  constraints: Array<{ normal: Vec; minimumVelocity: number }>,
+): Vec | null {
+  const tolerance = 1e-10;
+  let bestVelocity: Vec | null = null;
+  let bestDeltaSquared = Number.POSITIVE_INFINITY;
+
+  const considerCandidate = (candidate: Vec): void => {
+    if (constraints.some(({ normal, minimumVelocity }) => (
+      dot(candidate, normal) < minimumVelocity - tolerance
+    ))) {
+      return;
+    }
+
+    const delta = subtract(candidate, incomingVelocity);
+    const deltaSquared = dot(delta, delta);
+    if (
+      deltaSquared < bestDeltaSquared - tolerance ||
+      (
+        Math.abs(deltaSquared - bestDeltaSquared) <= tolerance &&
+        (!bestVelocity || candidate.x < bestVelocity.x || (
+          candidate.x === bestVelocity.x && candidate.y < bestVelocity.y
+        ))
+      )
+    ) {
+      bestVelocity = candidate;
+      bestDeltaSquared = deltaSquared;
+    }
+  };
+
+  considerCandidate(incomingVelocity);
+
+  for (const constraint of constraints) {
+    const correction = constraint.minimumVelocity - dot(incomingVelocity, constraint.normal);
+    considerCandidate(add(incomingVelocity, scaleVector(constraint.normal, correction)));
+  }
+
+  for (let leftIndex = 0; leftIndex < constraints.length; leftIndex += 1) {
+    const left = constraints[leftIndex];
+    for (let rightIndex = leftIndex + 1; rightIndex < constraints.length; rightIndex += 1) {
+      const right = constraints[rightIndex];
+      const determinant = left.normal.x * right.normal.y - left.normal.y * right.normal.x;
+      if (Math.abs(determinant) <= tolerance) {
+        continue;
+      }
+
+      considerCandidate({
+        x: (
+          left.minimumVelocity * right.normal.y -
+          left.normal.y * right.minimumVelocity
+        ) / determinant,
+        y: (
+          left.normal.x * right.minimumVelocity -
+          left.minimumVelocity * right.normal.x
+        ) / determinant,
+      });
+    }
+  }
+
+  return bestVelocity;
 }
 
 function ConstrainBallToPlayfield(incomingVelocity: Vec | null): void {
