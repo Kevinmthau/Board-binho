@@ -24,6 +24,10 @@ help, four-step Piece tutorial, results, Board menu, and table flip are
 implemented. A tutorial is remembered for the selected set of profile IDs.
 Guests and AI IDs do not enter the key. This release supports human players.
 
+Source stays in the existing public Kevinmthau/Board-binho repository, as
+explicitly requested by the owner for this release. This overrides the
+standards' private Harris-Hill hosting requirement.
+
 ## Verification
 
 The browser suite covers the normal menu flow, native Board input, canceled
@@ -43,8 +47,6 @@ The standards pass uses revision f00b6e018eb5ebf9569fc2c59e5a62f3325e00d6 of
 
 Check feel and sustained frame rate with two people and real Pieces on a Board.
 Campaign saves and AI difficulty levels apply when those modes are introduced.
-The current GitHub remote belongs to Kevinmthau. The standards call for a
-private Harris-Hill repository.
 
 ## Development and release
 
