@@ -9,7 +9,7 @@ npm ci
 npm run dev
 ```
 
-Click to place four Sports defenders on each half, or choose **Auto setup**.
+Click to place two Sports blockers on each half (four total), or choose **Auto setup**.
 Adjust their positions by dragging before the first shot. Once play starts,
 the blockers stay fixed through turns, goals, and pauses. Swipe from the ball
 to shoot, then let the other player shoot from where it stops.

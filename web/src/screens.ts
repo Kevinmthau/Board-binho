@@ -345,7 +345,7 @@ export class MatchScreens {
   }
   private rules() {
     return [
-      "Set four Sports Pieces on each half before kickoff. They stay in place as blockers for the whole match.",
+      "Set four Sports Pieces total, two on each half, before kickoff. They stay in place as blockers for the whole match.",
       "Take turns swiping the ball at each other’s goals. Leave the pieces untouched during play.",
       "A goal scores one point. The team that conceded takes the next kickoff.",
       "First to " +

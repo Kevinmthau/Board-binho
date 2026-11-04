@@ -7,13 +7,14 @@ in place.
 ## Decisions
 
 The mode is COMPETITIVE. Shots alternate between two human players. Four Sports
-Pieces defend each half. The standard match ends at three goals. House Rules
-offer one, three, five, or seven goals.
+Pieces act as blockers in total, two on each half. The standard match ends at
+three goals. House Rules offer one, three, five, or seven goals.
 
 Pieces are set before the opening shot, then remain fixed as blockers for the
 entire match, including goals and pauses. Players leave them untouched and take
 turns swiping the ball toward the opposite goal from wherever it stops. Browser
 placement and dragging are available only before the first shot.
+The Board uses the physical pieces without circular overlays or detection rings.
 
 The visual direction is sports, racing, and arcade. The font shortlist from
 the approved catalog was Fugaz One, Racing Sans One, and Bungee. Fugaz One was

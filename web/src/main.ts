@@ -93,7 +93,7 @@ const FIELD_SCREEN_FILL = 0.94;
 const FIELD_BACKGROUND_ASPECT = BOARD_WIDTH / BOARD_HEIGHT;
 const GOAL_MOUTH_TOP_PIXEL_Y = 374;
 const GOAL_MOUTH_BOTTOM_PIXEL_Y = 704;
-const DEFENDERS_PER_SIDE = 4;
+const DEFENDERS_PER_SIDE = 2;
 const REDETECTION_WINDOW_MS = 900;
 const BOARD_RESUME_GRACE_MS = 250;
 const OFF_BOARD_GOAL_CLEARANCE = 0.22;
@@ -195,10 +195,8 @@ let screens: MatchScreens;
 let lesson: ShotLesson | undefined;
 let flipped = false;
 let rosterPollAt = 0;
-let visualTime = 0;
 let soundLevel = clamp(Number(readLocal("volume", 75)), 0, 100);
 const pieceAngles = new Map<number, number>();
-const detectionFx: { position: Vec; radius: number; time: number; side: number; glyph: number }[] = [];
 let visiblePieceIds = new Set<number>();
 const cueAudio = { piece: new Audio("./sfx/piece.ogg"), flick: new Audio("./sfx/flick.ogg") };
 goalCheerAudio.volume = GOAL_CHEER_VOLUME * soundLevel / 100;
@@ -272,7 +270,6 @@ function startMatch(teach: boolean) {
   }) : undefined;
   document.body.classList.toggle("tutorial", teach);
   byId("coach").hidden = !teach;
-  detectionFx.length = 0;
   visiblePieceIds.clear();
   resetMatch();
 }
@@ -308,9 +305,6 @@ function flipTable() {
         candidate.contact = mirror(candidate.contact);
         for (const original of candidate.originals) if (original.side) original.side = opposite(original.side);
       }
-    }
-    for (const fx of detectionFx) {
-      fx.position = scaleVector(fx.position, -1); fx.side = 1-fx.side;
     }
     updateDefenders(latestBoardGlyphs);
   }
@@ -1030,7 +1024,6 @@ function frame(timestamp: number): void {
   if (!screens.playing) {
     requestAnimationFrame(frame); return;
   }
-  visualTime += deltaMs;
   if (lesson) {
     lesson.tick(deltaMs);
     render();
@@ -1308,10 +1301,7 @@ function updateDefenders(
     if (body.angle !== contact.angle) Matter.Body.setAngle(body, contact.angle);
   }
   if (screens?.playing) {
-    for (const [id, contact] of contacts) if (!visiblePieceIds.has(id) || reported?.get(id)?.began) {
-      detectionFx.push({ position: { ...contact.position }, radius: contact.piece.radius, time: visualTime,
-        side: contact.position.x < 0 ? 0 : 1, glyph: contact.piece.glyphId });
-      if (detectionFx.length > 24) detectionFx.shift();
+    for (const id of contacts.keys()) if (!visiblePieceIds.has(id) || reported?.get(id)?.began) {
       cue("piece", .25);
     }
   }
@@ -1604,14 +1594,12 @@ function autoSetupDefenders(): void {
   simulatedContacts.clear();
   const pieces = sportsPieces.values();
   for (const side of [-1, 1]) {
-    for (const column of [0.32, 0.67]) {
-      for (const row of [-0.43, 0.43]) {
-        const piece = pieces.next().value!;
-        addSimulatedDefender(piece, {
-          x: side * layout.pitchHalfWidth * column,
-          y: row * layout.pitchHalfHeight,
-        });
-      }
+    for (let index = 0; index < DEFENDERS_PER_SIDE; index++) {
+      const piece = pieces.next().value!;
+      addSimulatedDefender(piece, {
+        x: side * layout.pitchHalfWidth * 0.5,
+        y: (index === 0 ? -0.43 : 0.43) * layout.pitchHalfHeight,
+      });
     }
   }
   updateDefenders(simulatedContacts);
@@ -1850,22 +1838,9 @@ function render(): void {
   renderField();
   renderTrail();
   renderDefenders();
-  renderDetections();
   if (lesson) lesson.draw(ctx, layout.cssWidth, layout.cssHeight);
   else renderBall();
   renderUi();
-}
-
-function renderDetections(): void {
-  for (let i = detectionFx.length - 1; i >= 0; i--) {
-    const fx = detectionFx[i], age = (visualTime-fx.time)/520;
-    if (age >= 1) { detectionFx.splice(i,1); continue; }
-    const p = worldToScreen(fx.position);
-    ctx.save();
-    ctx.globalAlpha = 1-age; ctx.strokeStyle = fx.side ? RIGHT_COLOR : LEFT_COLOR;
-    ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x,p.y,fx.radius*layout.pixelScale*(1+age*.8),0,Math.PI*2); ctx.stroke();
-    ctx.restore();
-  }
 }
 
 function renderField(): void {
@@ -1889,14 +1864,7 @@ function renderField(): void {
 
 function renderDefenders(): void {
   // Physical pieces are their own markers. Only the browser needs stand-ins.
-  if (Board.isOnDevice) {
-    for (const { body, piece, side } of defenders.values()) {
-      const p = worldToScreen(body.position);
-      ctx.save(); ctx.strokeStyle = side === "left" ? LEFT_COLOR : RIGHT_COLOR; ctx.globalAlpha=.28;
-      ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x,p.y,piece.radius*layout.pixelScale,0,Math.PI*2);ctx.stroke();ctx.restore();
-    }
-    return;
-  }
+  if (Board.isOnDevice) return;
   for (const { body, piece, side } of defenders.values()) {
     const point = worldToScreen(body.position);
     ctx.save();

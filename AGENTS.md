@@ -22,7 +22,7 @@ This repository is **Flick Soccer**, a Board Web App.
 - Web app source: `web/`
 - Vendored SDK: `vendor/board.fun-web-sdk-1.0.0-beta.6.tgz`
 - SDK source: `/Users/kevinthau/Board Studio/board.fun-web-sdk-1.0.0-beta.6.tgz`
-- Piece set: Board Sports v0.1.0, four defenders per half. Any Sports piece can defend either side.
+- Piece set: Board Sports v0.1.0, four blockers total, two per half. Any Sports piece can defend either side. Do not draw circular piece markers on the Board.
 - Piece model: `web/public/model.tflite` (SHA-256 `4d75343e149b72f8410cad10f518c64791634ae6e6932880088a34c164026ad9`).
 
 ## Build and deploy loop

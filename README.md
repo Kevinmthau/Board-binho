@@ -12,7 +12,7 @@ need to be moved or touched for practice. HOW TO PLAY explains the rules;
 PRACTICE SWIPING repeats practice.
 
 Use one Board Sports set. Blue defends the left goal and Orange defends the
-right. Place any four of the eight Sports pieces on each half. Leave room
+right. Use four Sports pieces total, with two on each half. Leave room
 around each base and keep the center spot clear. Each side shows its count.
 Set the pieces once before kickoff, then leave them untouched as fixed blockers
 for the whole match.
@@ -102,7 +102,7 @@ npm ci
 npm run dev
 ```
 
-Click each half to place its four pieces, or select **Auto setup**. You can
+Click each half to place its two pieces, or select **Auto setup**. You can
 adjust their positions by dragging during setup. The first shot locks the
 blockers until the match is restarted. Take turns swiping from the ball to shoot.
 
