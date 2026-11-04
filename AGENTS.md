@@ -5,7 +5,6 @@ This repository is the **Board Web App** version of Board Binho.
 ## What to assume
 
 - This is a Vite/TypeScript Board Web SDK game packaged as `.webapp.zip`.
-- The Android wrapper is legacy compatibility code, not the primary build.
 - Use `Board.input.subscribe(...)` for live contact frames.
 - Track physical piece instances by `contactId`, not `glyphId`.
 - Treat `glyphId` as a piece type identifier only.
@@ -21,7 +20,6 @@ This repository is the **Board Web App** version of Board Binho.
 - SDK source: `/Users/kevinthau/Board Studio/board.fun-web-sdk-1.0.0-beta.6.tgz`
 - Piece set: Board Sports v0.1.0, four defenders per half. Any Sports piece can defend either side.
 - Piece model: `web/public/model.tflite` (SHA-256 `4d75343e149b72f8410cad10f518c64791634ae6e6932880088a34c164026ad9`).
-- Legacy Android wrapper: `android/`
 
 ## Build and deploy loop
 

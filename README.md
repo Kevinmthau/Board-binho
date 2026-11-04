@@ -20,7 +20,6 @@ kicks off from the center. Restart a match from the Board pause menu.
 - `web/PIECE_SET.json`: Sports glyphs, names, and sizes from the board-games-ai catalog.
 - `vendor/`: vendored Board Web SDK package.
 - `scripts/build_webapp.sh`: build, pack, install, and launch workflow.
-- `android/`: legacy Android wrapper, retained for compatibility only.
 
 ## Identity
 
