@@ -14,7 +14,7 @@ const lineup = [
   contact(17, 7, 1270, 780), contact(18, 8, 1600, 780),
 ];
 
-async function openGame(page: Page, board = false) {
+async function openGame(page: Page, board = false, { observeTouch = false } = {}) {
   await page.addInitScript(() => {
     localStorage.setItem("flick-soccer:tutorial-groups", JSON.stringify([
       JSON.stringify(["browser-blue", "browser-orange"]), JSON.stringify(["test-blue", "test-orange"]),
@@ -23,7 +23,7 @@ async function openGame(page: Page, board = false) {
   // The test host implements just the native wire interface. The actual
   // vendored SDK must translate frames and remove Ended/Canceled contacts.
   if (board) {
-    await page.addInitScript(() => {
+    await page.addInitScript((observeTouch) => {
       Object.assign(window, {
         BoardSDK: {
           setPauseContext() {},
@@ -35,7 +35,26 @@ async function openGame(page: Page, board = false) {
         },
         boardTouch: { postMessage() {} },
       });
-    });
+      if (observeTouch) {
+        // Studio's boot probe returns a stable dispatcher from its getter.
+        // That dispatcher calls the latest listener supplied to its setter.
+        const channel = window.boardTouch!;
+        let listener: typeof channel.onmessage;
+        let frames = 0;
+        const dispatch = (event: MessageEvent) => {
+          document.documentElement.dataset.hostFrames = String(++frames);
+          listener?.call(channel, event);
+        };
+        Object.defineProperty(channel, "onmessage", {
+          configurable: true,
+          get: () => listener && dispatch,
+          set: (next) => { listener = next; },
+        });
+        channel.postMessage = () => queueMicrotask(() => {
+          channel.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ c: [] }) }));
+        });
+      }
+    }, observeTouch);
   }
   // Explicit steps make short flicks, ball travel, and goal pauses repeatable.
   await page.clock.install({ time: new Date("2026-01-01T12:00:00Z") });
@@ -201,6 +220,32 @@ test("binary Board frames distinguish an armed cancellation from a release", asy
     await expect(page.locator("#blue-prompt")).toHaveText(terminal === Phase.Canceled ? "Flick the ball" : "Ball in play");
   }
 });
+
+for (const [transport, send] of [["JSON", frame], ["binary", binaryFrame]] as const) {
+  test(`Studio's observed touch channel boots and delivers ${transport} frames once`, async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await openGame(page, true, { observeTouch: true });
+    expect(errors).toEqual([]);
+    await expect(page.locator("html")).toHaveAttribute("data-host-frames", "1");
+
+    await send(page);
+    await send(page);
+    await send(page, ...lineup);
+    await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
+    for (const terminal of [Phase.Canceled, Phase.Ended]) {
+      await send(page, contact(90, 0, 960, 540, Type.Finger));
+      await send(page, contact(90, 0, 1070, 540, Type.Finger, Phase.Moved));
+      await send(page, contact(90, 0, 1070, 540, Type.Finger, terminal));
+      await expect(page.locator("#blue-prompt"))
+        .toHaveText(terminal === Phase.Canceled ? "Flick the ball" : "Ball in play");
+    }
+    await expect(page.locator("html")).toHaveAttribute("data-host-frames", "10");
+    await page.clock.runFor(700);
+    await expect(page.locator("#blue-value")).toHaveText("1");
+    expect(errors).toEqual([]);
+  });
+}
 
 for (const [transport, send] of [["JSON", frame], ["binary", binaryFrame]] as const) {
   test(`${transport} preserves a final move coalesced with release and discards it on cancellation`, async ({ page }) => {

@@ -22,7 +22,10 @@ still active.
 
 Run `npx playwright install chromium` once, then `npm test` to exercise the
 production build in Chromium. The Board input tests feed sensor frames through
-the vendored SDK using a test host.
+the vendored SDK using a test host. They also reproduce Studio's observed touch
+channel, whose `onmessage` getter forwards to the latest assigned listener.
+The input adapter observes the SDK handler before that host wraps it, avoiding
+a recursive dispatch loop while preserving release and cancellation phases.
 
 ## Board Package
 

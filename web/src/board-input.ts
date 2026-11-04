@@ -24,10 +24,12 @@ export function subscribeToBoardFrames(
 ): void {
   if (!Board.isOnDevice) return;
   const reported = new Map<number, ContactChange>();
-  Board.input.subscribe((contacts) => onFrame(contacts, reported));
+  const subscribe = () => Board.input.subscribe((contacts) => onFrame(contacts, reported));
   const channel = window.boardTouch;
-  const dispatch = channel?.onmessage;
-  if (!channel || !dispatch) return;
+  if (!channel) {
+    subscribe();
+    return;
+  }
 
   function record(id: number, phase: BoardContactPhase, finger: boolean, x: number, y: number): void {
     const previous = reported.get(id);
@@ -55,26 +57,49 @@ export function subscribeToBoardFrames(
     reported.set(id, change);
   }
 
-  channel.onmessage = (event) => {
-    try {
-      if (typeof event.data === "string") {
-        for (const { id, p, t, g, x, y } of JSON.parse(event.data).c ?? []) {
-          record(id, p, t === BoardContactType.Finger && g === 0, x, y);
+  function observe(dispatch: (event: MessageEvent) => void) {
+    return (event: MessageEvent) => {
+      try {
+        if (typeof event.data === "string") {
+          for (const { id, p, t, g, x, y } of JSON.parse(event.data).c ?? []) {
+            record(id, p, t === BoardContactType.Finger && g === 0, x, y);
+          }
+        } else if (event.data instanceof ArrayBuffer) {
+          // Beta.6 binary layout: 12-byte header, 36-byte contact records.
+          const view = new DataView(event.data);
+          const count = view.getInt32(8, true);
+          for (let i = 0; i < count; i++) {
+            const offset = 12 + i * 36;
+            const finger = view.getInt32(offset + 16, true) === BoardContactType.Finger && view.getInt32(offset + 24, true) === 0;
+            record(view.getInt32(offset, true), view.getInt32(offset + 20, true), finger,
+              view.getFloat32(offset + 4, true), view.getFloat32(offset + 8, true));
+          }
         }
-      } else if (event.data instanceof ArrayBuffer) {
-        // Beta.6 binary layout: 12-byte header, 36-byte contact records.
-        const view = new DataView(event.data);
-        const count = view.getInt32(8, true);
-        for (let i = 0; i < count; i++) {
-          const offset = 12 + i * 36;
-          const finger = view.getInt32(offset + 16, true) === BoardContactType.Finger && view.getInt32(offset + 24, true) === 0;
-          record(view.getInt32(offset, true), view.getInt32(offset + 20, true), finger,
-            view.getFloat32(offset + 4, true), view.getFloat32(offset + 8, true));
-        }
+        dispatch.call(channel, event);
+      } finally {
+        reported.clear();
       }
-      dispatch.call(channel, event);
+    };
+  }
+
+  const descriptor = Object.getOwnPropertyDescriptor(channel, "onmessage");
+  if (descriptor?.set && descriptor.configurable) {
+    // Studio's getter returns a dispatcher that calls its latest assigned
+    // listener. Wrapping that getter's result would make it call itself.
+    // Observe the SDK handler as it is assigned, before the host wraps it.
+    const set = descriptor.set;
+    Object.defineProperty(channel, "onmessage", {
+      ...descriptor,
+      set(handler) { set.call(this, typeof handler === "function" ? observe(handler) : handler); },
+    });
+    try {
+      subscribe();
     } finally {
-      reported.clear();
+      Object.defineProperty(channel, "onmessage", descriptor);
     }
-  };
+  } else {
+    subscribe();
+    const dispatch = channel.onmessage;
+    if (dispatch) channel.onmessage = observe(dispatch);
+  }
 }
