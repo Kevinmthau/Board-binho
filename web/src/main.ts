@@ -8,7 +8,7 @@ import Matter from "matter-js";
 import { subscribeToBoardFrames, type BoardFrameChanges, type FingerTrace } from "./board-input";
 import { cancelBoardControls, routeBoardControls, wireNativeClicks } from "./board-controls";
 import { MatchScreens, byId } from "./screens";
-import { PieceLesson } from "./piece-lesson";
+import { ShotLesson } from "./shot-lesson";
 import { GAME_NAME, readLocal, writeLocal } from "./match-settings";
 import { BOARD_HEIGHT, BOARD_WIDTH, FIELD_WORLD_HEIGHT, createSportsBumper, sportsPieces, type SportsPiece } from "./sports";
 
@@ -25,22 +25,12 @@ type DefenderContact = {
   piece: SportsPiece;
   position: Vec;
   angle: number;
-  isTouched?: boolean;
-  touchStarted?: boolean;
 };
 
 type Defender = {
   side: PlayerSide;
   piece: SportsPiece;
   body: Matter.Body;
-};
-
-type LiftedDefender = Pick<Defender, "side" | "piece"> & {
-  liveId?: number;
-  position: Vec;
-  liftedAt: number;
-  fromPause: boolean;
-  canceled?: boolean;
 };
 
 type BoardRecovery = {
@@ -58,12 +48,6 @@ type BoardRecovery = {
   rosterSize: number;
   fromPause: boolean;
   continuityConfirmed: boolean;
-};
-
-type DefenderUpdates = {
-  reported: BoardFrameChanges;
-  newlyRecognized: ReadonlySet<number>;
-  handoffs: ReadonlyMap<number, DefenderContact>;
 };
 
 type SwipeSample = {
@@ -193,7 +177,6 @@ goalCheerAudio.volume = GOAL_CHEER_VOLUME;
 let cheerPausedWithMatch = false;
 
 const defenders = new Map<number, Defender>();
-let liftedDefenders: LiftedDefender[] = [];
 const boardSwipeContacts = new Map<number, SwipeContactState>();
 let latestBoardGlyphs = new Map<number, DefenderContact>();
 let liveBoardContactIds = new Set<number>();
@@ -209,9 +192,8 @@ const ballTrail: Vec[] = [];
 
 let nextSimulatedContactId = 1000;
 let screens: MatchScreens;
-let lesson: PieceLesson | undefined;
+let lesson: ShotLesson | undefined;
 let flipped = false;
-let hoverWorld: Vec | undefined;
 let rosterPollAt = 0;
 let visualTime = 0;
 let soundLevel = clamp(Number(readLocal("volume", 75)), 0, 100);
@@ -281,7 +263,7 @@ function screenChanged() {
 function startMatch(teach: boolean) {
   // A new match cannot consume a native resume as a duplicate of player selection.
   lastBoardResumeAt = -Infinity;
-  lesson = teach ? new PieceLesson(Board.isOnDevice, () => {
+  lesson = teach ? new ShotLesson(() => {
     screens.tutorialComplete();
     lesson = undefined;
     document.body.classList.remove("tutorial");
@@ -312,9 +294,8 @@ function flipTable() {
     latestBoardGlyphs = new Map([...latestBoardGlyphs].map(([id, contact]) => [id, mirror(contact)]));
     for (const defender of defenders.values()) {
       defender.side = opposite(defender.side);
-    }
-    for (const lift of liftedDefenders) {
-      lift.side = opposite(lift.side); lift.position = scaleVector(lift.position, -1);
+      Matter.Body.setPosition(defender.body, scaleVector(defender.body.position, -1));
+      Matter.Body.setAngle(defender.body, defender.body.angle + Math.PI);
     }
     for (const substitute of staleBoardIds.values()) if (substitute) substitute.side = opposite(substitute.side);
     if (boardRecovery) {
@@ -376,10 +357,6 @@ function setSuspended(value: boolean): void {
       } else {
         boardRecovery = createBoardRecovery(true);
       }
-      // Native cancellation of the whole surface can precede WebView blur.
-      for (const lift of liftedDefenders) {
-        if (lift.canceled && engine.timing.timestamp - lift.liftedAt <= BOARD_RESUME_GRACE_MS) lift.fromPause = true;
-      }
     } else {
       lastBoardResumeAt = lastFrameTimestamp;
       if (boardRecovery?.fromPause) {
@@ -399,7 +376,7 @@ function finishMenuReconciliation(now: number): void {
   const restarted = trackerRestartConfirmed(boardRecovery, now);
   reconcileSetupCandidates(boardRecovery, latestBoardGlyphs, now, restarted);
   if (!restarted) {
-    updateDefenders(latestBoardGlyphs, true);
+    updateDefenders(latestBoardGlyphs);
     return;
   }
   // The menu callback has no new sensor samples. Keep previously retired
@@ -413,7 +390,7 @@ function finishMenuReconciliation(now: number): void {
     if (staleBoardIds.has(id)) staleBoardIds.set(id, null);
   }
   boardRecovery = null;
-  updateDefenders(latestBoardGlyphs, true);
+  updateDefenders(latestBoardGlyphs);
 }
 
 function configureBoardMenu(): void {
@@ -482,8 +459,6 @@ function handleBoardContacts(contacts: readonly BoardContact[], reported: BoardF
         piece,
         position: boardContactWorldPosition(contact),
         angle: pieceAngles.get(contact.contactId)! + (flipped ? Math.PI : 0),
-        isTouched: contact.isTouched,
-        touchStarted: contact.isTouched && !latestBoardGlyphs.get(contact.contactId)?.isTouched,
       });
     } else if (contact.type === BoardContactType.Finger && contact.glyphId === 0) {
       fingerContacts.push(contact);
@@ -551,18 +526,13 @@ function updateBoardSuspension(contacts: readonly BoardContact[], reported: Boar
 
 function applyBoardRoster(next: Map<number, DefenderContact>, reported: BoardFrameChanges, previousLiveIds = liveBoardContactIds): void {
   const handoffs = new Map<number, DefenderContact>();
-  const trackerRestarted = reconcileBoardRoster(next, reported, previousLiveIds, handoffs);
+  reconcileBoardRoster(next, reported, previousLiveIds, handoffs);
   for (const id of staleBoardIds.keys()) liveBoardContactIds.delete(id);
-  const newlyRecognized = new Set<number>();
-  for (const id of next.keys()) {
-    if (!latestBoardGlyphs.has(id) || reported.get(id)?.began) newlyRecognized.add(id);
-  }
   // A waiting extra piece cannot take an incumbent's slot during an ID handoff.
   const priority = new Map<number, DefenderContact>();
   for (const contact of handoffs.values()) priority.set(contact.contactId, contact);
   latestBoardGlyphs = priority.size ? new Map([...priority, ...next]) : next;
-  updateDefenders(latestBoardGlyphs, suspended || performance.now() < resumeShotAt || trackerRestarted,
-    { reported, newlyRecognized, handoffs });
+  updateDefenders(latestBoardGlyphs, reported);
 }
 
 function createBoardRecovery(fromPause: boolean, liveIds = liveBoardContactIds): BoardRecovery {
@@ -641,14 +611,9 @@ function reconcileBoardRoster(
       if (boardRecovery) boardRecovery.continuityConfirmed = true;
       const replacementId = substitute.replacementId;
       const slot = replacementId !== undefined ? defenders.get(replacementId) : undefined;
-      if (replacementId !== undefined && slot?.side === substitute.side) {
+      if (!didServeInitialKickoff && replacementId !== undefined && slot?.side === substitute.side) {
         defenders.delete(replacementId);
         defenders.set(id, slot);
-      } else if (phase === "ballInMotion") {
-        liftedDefenders.push({
-          liveId: id, side: substitute.side, piece: contact.piece, position: contact.position,
-          liftedAt: engine.timing.timestamp, fromPause: true,
-        });
       }
     }
   }
@@ -903,7 +868,7 @@ function wirePointerFallback(): void {
   canvas.addEventListener("pointerdown", (event) => {
     if (!screens.playing || suspended) return;
     const worldPosition = pointerWorldPosition(event);
-    if (lesson && lesson.step >= 3) {
+    if (lesson) {
       lesson.finger(event.pointerId, pointerFraction(event), "down");
       canvas.setPointerCapture(event.pointerId); return;
     }
@@ -929,7 +894,6 @@ function wirePointerFallback(): void {
   canvas.addEventListener("pointermove", (event) => {
     if (!screens.playing || suspended) return;
     const worldPosition = pointerWorldPosition(event);
-    hoverWorld = worldPosition;
     lesson?.finger(event.pointerId, pointerFraction(event), "move");
     const draggedContactId = pointerDefenderDrags.get(event.pointerId);
     if (draggedContactId !== undefined) {
@@ -970,15 +934,6 @@ function wirePointerFallback(): void {
   canvas.addEventListener("pointerup", finishPointer);
   canvas.addEventListener("pointercancel", finishPointer);
   canvas.addEventListener("lostpointercapture", finishPointer);
-  window.addEventListener("keydown", (event) => {
-    if (event.key.toLowerCase() !== "r" || !hoverWorld || !screens.playing || suspended) return;
-    const contact = [...simulatedContacts.values()].find((p) => distance(p.position, hoverWorld!) < p.piece.radius * 1.5);
-    if (contact) {
-      contact.angle += Math.PI / 6;
-      updateDefenders(simulatedContacts);
-      event.preventDefault();
-    }
-  });
 }
 
 function updateSwipeState(
@@ -1318,36 +1273,18 @@ function countDefenders(side: PlayerSide): number {
 }
 
 function updateDefenders(
-  contacts: ReadonlyMap<number, DefenderContact>, fromPause = false,
-  updates?: DefenderUpdates,
+  contacts: ReadonlyMap<number, DefenderContact>, reported?: BoardFrameChanges,
 ): void {
-  // The physics clock stops while the menu is open.
-  const now = engine.timing.timestamp;
-  const liveIds = Board.isOnDevice ? liveBoardContactIds : contacts;
-  for (const lift of liftedDefenders) {
-    if (lift.liveId !== undefined && (!liveIds.has(lift.liveId) || updates?.reported.get(lift.liveId)?.began)) {
-      lift.liveId = undefined;
-      lift.liftedAt = now;
-    }
-  }
-  liftedDefenders = phase === "ballInMotion"
-    ? liftedDefenders.filter((lift) => lift.liveId !== undefined || now - lift.liftedAt < REDETECTION_WINDOW_MS)
-    : [];
+  // The opening shot locks the blockers for the entire match, including goals,
+  // menu visits and tracker interruptions. Only a new match reopens setup.
+  if (didServeInitialKickoff) return;
   // Keep existing slots when extra pieces arrive. Copies share a glyph but
   // every contact owns its own collider until it leaves its half.
   for (const [id, defender] of defenders) {
     const contact = contacts.get(id);
-    const change = updates?.reported.get(id);
+    const change = reported?.get(id);
     const newLifetime = change?.began;
     if (!contact || newLifetime || placementSide(contact.position, contact.piece, contact.angle) !== defender.side) {
-      if (phase === "ballInMotion") {
-        liftedDefenders.push({
-          liveId: updates?.handoffs.get(id)?.contactId ?? (!newLifetime && liveIds.has(id) ? id : undefined),
-          side: defender.side, piece: defender.piece,
-          position: { ...defender.body.position }, liftedAt: now, fromPause,
-          canceled: change?.canceled,
-        });
-      }
       Matter.Composite.remove(engine.world, defender.body);
       defenders.delete(id);
     }
@@ -1358,24 +1295,12 @@ function updateDefenders(
     if (defender?.piece !== contact.piece) {
       const side = placementSide(contact.position, contact.piece, contact.angle);
       if (!side || (!defender && countDefenders(side) >= DEFENDERS_PER_SIDE)) continue;
-      if (!defender && phase === "ballInMotion") {
-        // A blink must return near the last pose. During a menu visit an
-        // existing defender can move before the tracker assigns its new ID.
-        let index = liftedDefenders.findIndex((lift) => lift.liveId === id && lift.side === side);
-        if (index < 0 && updates?.newlyRecognized.has(id)) {
-          index = liftedDefenders.findIndex((lift) => lift.piece === contact.piece && lift.side === side &&
-            (lift.liveId === undefined || !contacts.has(lift.liveId)) &&
-            ((lift.liveId === undefined && lift.fromPause) || distance(lift.position, contact.position) <= contact.piece.radius));
-        }
-        if (index < 0) continue;
-        liftedDefenders.splice(index, 1);
-      }
       if (defender) Matter.Composite.remove(engine.world, defender.body);
       defender = { side, piece: contact.piece, body: createSportsBumper(contact.piece) };
       defenders.set(id, defender);
       Matter.Composite.add(engine.world, defender.body);
     }
-    // A defender that slides or turns must still collide at the real base.
+    // During setup, align each blocker with its physical base.
     const { body } = defender;
     if (body.position.x !== contact.position.x || body.position.y !== contact.position.y) {
       Matter.Body.setPosition(body, contact.position);
@@ -1383,7 +1308,7 @@ function updateDefenders(
     if (body.angle !== contact.angle) Matter.Body.setAngle(body, contact.angle);
   }
   if (screens?.playing) {
-    for (const [id, contact] of contacts) if (!visiblePieceIds.has(id) || updates?.reported.get(id)?.began) {
+    for (const [id, contact] of contacts) if (!visiblePieceIds.has(id) || reported?.get(id)?.began) {
       detectionFx.push({ position: { ...contact.position }, radius: contact.piece.radius, time: visualTime,
         side: contact.position.x < 0 ? 0 : 1, glyph: contact.piece.glyphId });
       if (detectionFx.length > 24) detectionFx.shift();
@@ -1391,11 +1316,6 @@ function updateDefenders(
     }
   }
   visiblePieceIds = new Set(contacts.keys());
-  if (lesson && screens.playing && !suspended) lesson.contacts([...contacts.values()].map((p) => {
-    const screen = worldToScreen(p.position);
-    return { id:p.contactId, x:screen.x/layout.cssWidth, y:screen.y/layout.cssHeight, angle:p.angle,
-      touchStarted:p.touchStarted, glyph:p.piece.glyphId };
-  }));
   UpdateMatchPhaseFromPlacements();
 }
 
@@ -1502,6 +1422,7 @@ function LaunchShot(impulse: Vec): void {
   }
 
   didServeInitialKickoff = true;
+  pointerDefenderDrags.clear();
   cue("flick", .45);
   CancelActiveShot();
   ballInPlay = true;
@@ -1677,7 +1598,7 @@ function resetMatch(): void {
 }
 
 function autoSetupDefenders(): void {
-  if (Board.isOnDevice || phase === "ballInMotion" || phase === "goalPause") return;
+  if (Board.isOnDevice || lesson || didServeInitialKickoff) return;
 
   pointerDefenderDrags.clear();
   simulatedContacts.clear();
@@ -1697,12 +1618,11 @@ function autoSetupDefenders(): void {
 }
 
 function beginBrowserDefenderDrag(position: Vec): DefenderContact | null {
-  if (phase === "goalPause") return null;
+  if (lesson || didServeInitialKickoff) return null;
   const existing = Array.from(simulatedContacts.values()).find((contact) =>
     distance(contact.position, position) <= contact.piece.radius,
   );
   if (existing) return existing;
-  if (phase === "ballInMotion") return null;
 
   const placed = new Set(Array.from(simulatedContacts.values(), (contact) => contact.piece.glyphId));
   const piece = Array.from(sportsPieces.values()).find((candidate) => !placed.has(candidate.glyphId));
@@ -1724,6 +1644,7 @@ function addSimulatedDefender(piece: SportsPiece, position: Vec): DefenderContac
 }
 
 function moveBrowserDefender(contactId: number, position: Vec): void {
+  if (lesson || didServeInitialKickoff) return;
   const contact = simulatedContacts.get(contactId);
   if (!contact) return;
 
@@ -1930,7 +1851,7 @@ function render(): void {
   renderTrail();
   renderDefenders();
   renderDetections();
-  if (lesson) lesson.draw(ctx, layout.cssWidth, layout.cssHeight, previewArt.get(4));
+  if (lesson) lesson.draw(ctx, layout.cssWidth, layout.cssHeight);
   else renderBall();
   renderUi();
 }
@@ -2059,7 +1980,7 @@ function renderUi(): void {
     if (prompt.textContent !== message) prompt.textContent = message;
     panel.classList.toggle("to-shoot", phase === "readyToShoot" && currentTurn === side);
   }
-  autoSetupButton.toggleAttribute("disabled", phase === "ballInMotion" || phase === "goalPause");
+  autoSetupButton.toggleAttribute("disabled", !!lesson || didServeInitialKickoff);
   document.body.classList.toggle("show-setup", phase === "setup");
   document.body.classList.toggle("show-goal", phase === "goalPause");
 

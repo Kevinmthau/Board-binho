@@ -7,18 +7,21 @@ Web SDK for physical defenders and finger shots and ships as a `.webapp.zip`.
 
 Choose PLAY, COMPETITIVE, and two players from the Board profile picker.
 House Rules offers a goal target of 1, 3, 5, or 7. The standard is 3.
-The first match for each group starts with an interactive Piece tutorial.
-HOW TO PLAY explains the game with animated pages. PLAY TUTORIAL repeats practice.
+The first match for each group starts with a short swipe practice. No pieces
+need to be moved or touched for practice. HOW TO PLAY explains the rules;
+PRACTICE SWIPING repeats practice.
 
 Use one Board Sports set. Blue defends the left goal and Orange defends the
 right. Place any four of the eight Sports pieces on each half. Leave room
 around each base and keep the center spot clear. Each side shows its count.
+Set the pieces once before kickoff, then leave them untouched as fixed blockers
+for the whole match.
 
-Blue takes the first shot. Flick the ball toward the other goal. When the ball
-stops, the turn passes to the other side. After a goal, the team that conceded
-kicks off from the center. The first team to the chosen goal target wins.
+Blue takes the first shot. Swipe the ball toward the other goal. When the ball
+stops, the other player swipes from where it rests. After a goal, the team that
+conceded kicks off from the center. The first team to the chosen goal target wins.
 Restart, return to modes, or open How to Play from the Board pause menu.
-Touch a Piece while turning it. The flip button turns the table view.
+The flip button turns the table view.
 
 ## Layout
 
@@ -99,9 +102,9 @@ npm ci
 npm run dev
 ```
 
-Click each half to place its four pieces, or select **Auto setup**. Drag a
-piece to reposition it. Hover over a piece and press **R** to turn it.
-Drag across the ball from its center to shoot.
+Click each half to place its four pieces, or select **Auto setup**. You can
+adjust their positions by dragging during setup. The first shot locks the
+blockers until the match is restarted. Take turns swiping from the ball to shoot.
 
 Run the browser and SDK input regression tests in `web` with Node.js 20 or newer.
 

@@ -323,7 +323,6 @@ dialog {
   top: 34%;
   height: 38%;
   object-fit: contain;
-  animation: place-demo 2.5s ease-in-out infinite;
 }
 .clip-ball {
   position: absolute;
@@ -341,12 +340,6 @@ dialog {
   border: 3px solid #ffa064;
   background: #ffe7b995;
 }
-#lesson-clip[data-demo="slide"] img {
-  animation: slide-demo 2.5s ease-in-out infinite;
-}
-#lesson-clip[data-demo="turn"] img {
-  animation: turn-demo 2.5s ease-in-out infinite;
-}
 #lesson-clip:is([data-demo="flick"], [data-demo="score"]) .clip-ball {
   animation: shoot-demo 2.5s ease-in-out infinite;
 }
@@ -355,38 +348,6 @@ dialog {
   left: 48%;
   top: 53%;
   animation: finger-demo 2.5s infinite;
-}
-@keyframes place-demo {
-  0%,
-  100% {
-    transform: translateY(-20%);
-    opacity: 0.45;
-  }
-  35%,
-  85% {
-    transform: none;
-    opacity: 1;
-  }
-}
-@keyframes slide-demo {
-  0%,
-  100% {
-    transform: translateX(-12%);
-  }
-  55%,
-  80% {
-    transform: translate(75%, -22%);
-  }
-}
-@keyframes turn-demo {
-  0%,
-  100% {
-    transform: rotate(-15deg);
-  }
-  50%,
-  70% {
-    transform: rotate(28deg);
-  }
 }
 @keyframes shoot-demo {
   0%,
@@ -415,8 +376,7 @@ dialog {
     left: 60%;
   }
 }
-#lesson-dots,
-#coach-dots {
+#lesson-dots {
   letter-spacing: 0.32em;
   color: #ffd496;
 }

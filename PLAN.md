@@ -10,6 +10,11 @@ The mode is COMPETITIVE. Shots alternate between two human players. Four Sports
 Pieces defend each half. The standard match ends at three goals. House Rules
 offer one, three, five, or seven goals.
 
+Pieces are set before the opening shot, then remain fixed as blockers for the
+entire match, including goals and pauses. Players leave them untouched and take
+turns swiping the ball toward the opposite goal from wherever it stops. Browser
+placement and dragging are available only before the first shot.
+
 The visual direction is sports, racing, and arcade. The font shortlist from
 the approved catalog was Fugaz One, Racing Sans One, and Bungee. Fugaz One was
 selected for its italic sports lettering. Its shipped metadata uses the family
@@ -20,7 +25,7 @@ canvas artwork. The home reserves space for PLAY and HOW TO PLAY. Real Sports
 renders appear in help, practice, and browser play.
 
 The standard screen flow, OS player picker, remembered house rules, animated
-help, four-step Piece tutorial, results, Board menu, and table flip are
+help, swipe-only practice, results, Board menu, and table flip are
 implemented. A tutorial is remembered for the selected set of profile IDs.
 Guests and AI IDs do not enter the key. This release supports human players.
 
@@ -32,7 +37,8 @@ standards' private Harris-Hill hosting requirement.
 
 The browser suite covers the normal menu flow, native Board input, canceled
 contacts, pause and resume, tracker recovery, physics, tutorial retries and
-profile groups, house rules, results, rotation touch gating, and flipped input.
+profile groups, house rules, results, fixed blockers, setup orientation touch
+gating, and flipped input.
 An offline test serves the production files from disk with the browser network
 disabled, then plays through a goal to the results screen.
 
@@ -50,8 +56,9 @@ Campaign saves and AI difficulty levels apply when those modes are introduced.
 
 ## Development and release
 
-Use `cd web && npm run dev` for browser play. Hover over a simulated Piece and
-press R to turn it. Use the browser Match menu for pause and help.
+Use `cd web && npm run dev` for browser play. Set the blockers before the first
+shot, then take turns swiping the ball. Use the browser Match menu for pause
+and help.
 
 Use `./scripts/release_webapp.sh` for a new versioned release. It renders the
 current 1536 × 864 title card, runs the tests, builds and checks the package,

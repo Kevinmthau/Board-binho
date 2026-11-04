@@ -10,9 +10,11 @@ npm run dev
 ```
 
 Click to place four Sports defenders on each half, or choose **Auto setup**.
-Drag a piece to reposition it. Hover over it and press R to turn it.
-Drag from the ball to shoot. The browser uses pointer input and draws the
-Sports pieces. Board hardware uses the physical pieces and SDK finger input.
+Adjust their positions by dragging before the first shot. Once play starts,
+the blockers stay fixed through turns, goals, and pauses. Swipe from the ball
+to shoot, then let the other player shoot from where it stops.
+The browser uses pointer input and draws the Sports pieces. Board hardware
+uses the physical pieces and SDK finger input.
 
 After the Board pause menu closes, a piece can acquire a new contact ID while
 the SDK still reports its old one. During setup, the game counts a possible

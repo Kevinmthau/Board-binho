@@ -11,7 +11,8 @@ This repository is **Flick Soccer**, a Board Web App.
 - Always guard SDK calls with `Board.isOnDevice` so browser preview works.
 - The build and packed ZIP must contain no web addresses, including in asset metadata.
 - Keep asset source links in repository documentation and preserve shipped license terms.
-- Touch gates Piece rotation. Menu, tutorial, flip, and profile flows have browser regressions.
+- Pieces are placed once before kickoff and stay fixed as blockers for the whole match. Only the ball is swiped during play.
+- Touch gates orientation updates during setup. Menu, swipe practice, flip, and profile flows have browser regressions.
 
 ## Project identity
 

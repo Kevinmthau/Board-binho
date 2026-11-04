@@ -181,6 +181,43 @@ test("manual browser placement caps each half at four and keeps dragged pieces o
   await expect(page.locator("#orange-value")).toHaveText("4/4");
 });
 
+test("browser blockers cannot be dragged or rotated during play or between goals", async ({ page }) => {
+  await openGame(page);
+  for (const [x, y] of [[145, 150], [315, 150], [145, 390], [315, 390],
+    [695, 270], [815, 150], [635, 390], [815, 390]]) {
+    await page.mouse.click(x, y);
+  }
+  const shoot = async () => {
+    await page.mouse.move(480, 270);
+    await page.mouse.down();
+    await page.clock.runFor(16);
+    await page.mouse.move(565, 270);
+    await page.mouse.up();
+  };
+  const tryMovingBlocker = async () => {
+    await page.mouse.move(695, 270);
+    await page.keyboard.press("r");
+    await page.mouse.down();
+    await page.mouse.move(695, 140);
+    await page.mouse.up();
+  };
+  await shoot();
+  await tryMovingBlocker();
+  await page.clock.runFor(2600);
+  await expect(page.locator("#orange-value")).toHaveText("1");
+  await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
+  await expect(page.locator("#auto-setup-button")).toBeDisabled();
+  await tryMovingBlocker();
+  await shoot();
+  await page.clock.runFor(1400);
+  await expect(page.locator("#orange-value")).toHaveText("2");
+  await expect(page.locator("#blue-value")).toHaveText("0");
+  await page.locator("#reset-button").click({ force: true });
+  await page.clock.runFor(32);
+  await expect(page.locator("#auto-setup-button")).toBeEnabled();
+  await expect(page.locator("#blue-value")).toHaveText("0/4");
+});
+
 test("an observed two-frame flick scores while a hand or canceled touch does not", async ({ page }) => {
   await openGame(page, true);
   await frame(page, ...lineup);
@@ -434,7 +471,7 @@ for (const separateFrames of [false, true]) {
 }
 
 for (const beforeBlur of [false, true]) {
-  test(`a goalie relocated after system cancellations ${beforeBlur ? "before" : "after"} blur still blocks the shot`, async ({ page }) => {
+  test(`blockers stay fixed after system cancellations ${beforeBlur ? "before" : "after"} blur`, async ({ page }) => {
     await openGame(page, true);
     await frame(page, ...lineup);
     await flickOnBoard(page);
@@ -447,7 +484,8 @@ for (const beforeBlur of [false, true]) {
     const fresh = lineup.map((piece) => ({ ...piece, id: piece.id + 100 }));
     await frame(page, ...fresh.map((piece) => piece.g === 5 ? { ...piece, x: 1390, y: 540 } : piece));
     await page.clock.runFor(1500);
-    await expect(page.locator("#orange-value")).toHaveText("1");
+    await expect(page.locator("#blue-value")).toHaveText("1");
+    await expect(page.locator("#orange-value")).toHaveText("0");
   });
 }
 
@@ -760,7 +798,7 @@ for (const coalesced of [false, true]) {
 }
 
 for (const fullLineup of [false, true]) {
-  test(`a relocated goalie can inherit a distant contact ID with full return ${fullLineup}`, async ({ page }) => {
+  test(`a changed tracker ID cannot relocate a blocker with full return ${fullLineup}`, async ({ page }) => {
     await openGame(page, true);
     await frame(page, ...lineup);
     await flickOnBoard(page);
@@ -770,8 +808,8 @@ for (const fullLineup of [false, true]) {
     const rest = fullLineup ? lineup.filter((piece) => piece.g !== 5) : [lineup[5]];
     await frame(page, ...rest.map((piece) => ({ ...piece, id: piece.id + 100 })));
     await page.clock.runFor(1500);
-    await expect(page.locator("#orange-value")).toHaveText("1");
-    await expect(page.locator("#blue-value")).toHaveText("0");
+    await expect(page.locator("#orange-value")).toHaveText("0");
+    await expect(page.locator("#blue-value")).toHaveText("1");
   });
 }
 
@@ -848,7 +886,7 @@ test("a one-pixel final move cannot discard a qualified release", async ({ page 
   await expect(page.locator("#blue-value")).toHaveText("1");
 });
 
-test("a resumed shot waits for a goalie recognized later than the rest of the lineup", async ({ page }) => {
+test("a late tracker update cannot move a blocker into a resumed shot", async ({ page }) => {
   await openGame(page, true);
   await frame(page, ...lineup);
   await flickOnBoard(page);
@@ -861,22 +899,23 @@ test("a resumed shot waits for a goalie recognized later than the rest of the li
   await page.clock.runFor(140);
   await frame(page, { ...fresh[4], x: 1390, y: 540 });
   await page.clock.runFor(1300);
-  await expect(page.locator("#orange-value")).toHaveText("1");
-  await expect(page.locator("#blue-value")).toHaveText("0");
+  await expect(page.locator("#orange-value")).toHaveText("0");
+  await expect(page.locator("#blue-value")).toHaveText("1");
 });
 
-test("a lifted goalie cannot stall a paused shot when no more frames arrive", async ({ page }) => {
+test("a blocker stays fixed when its contact ends during a paused shot", async ({ page }) => {
   await openGame(page, true);
   await frame(page, ...lineup, contact(15, 5, 1390, 540, Type.Glyph, Phase.Moved));
   await flickOnBoard(page);
   await page.evaluate(() => window.dispatchEvent(new Event("blur")));
   await frame(page, contact(15, 5, 1390, 540, Type.Glyph, Phase.Ended));
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await page.clock.runFor(1000);
-  await expect(page.locator("#blue-value")).toHaveText("1");
+  await page.clock.runFor(1500);
+  await expect(page.locator("#blue-value")).toHaveText("0");
+  await expect(page.locator("#orange-value")).toHaveText("1");
 });
 
-test("a continuously tracked goalie can change glyph or return from the rail during a shot", async ({ page }) => {
+test("a blocker stays fixed when its glyph or position changes during a shot", async ({ page }) => {
   await openGame(page, true);
   for (const leaveHalf of [false, true]) {
     await restartBoardMatch(page);
@@ -890,15 +929,15 @@ test("a continuously tracked goalie can change glyph or return from the rail dur
   }
 });
 
-test("a goalie retains its live ID through an unclassified sensor frame", async ({ page }) => {
+test("reclassification cannot move a blocker into a shot", async ({ page }) => {
   await openGame(page, true);
   await frame(page, ...lineup);
   await flickOnBoard(page);
   await frame(page, contact(15, 0, 1340, 440, Type.Blob, Phase.Moved));
   await frame(page, contact(15, 5, 1390, 540, Type.Glyph, Phase.Moved));
   await page.clock.runFor(1400);
-  await expect(page.locator("#orange-value")).toHaveText("1");
-  await expect(page.locator("#blue-value")).toHaveText("0");
+  await expect(page.locator("#orange-value")).toHaveText("0");
+  await expect(page.locator("#blue-value")).toHaveText("1");
 });
 
 test("a goalie can be recognized again while its previous ID tracks the hand", async ({ page }) => {
@@ -947,24 +986,27 @@ test("the hockey base can clear the kickoff ball with its front notch", async ({
   await expect(page.locator("#blue-value")).toHaveText("3/4");
 });
 
-test("a sliding defender no longer blocks the empty space it left", async ({ page }) => {
+test("movement and touch cannot change a blocker after kickoff", async ({ page }) => {
   await openGame(page, true);
   await frame(page, ...lineup, contact(15, 5, 1390, 540, Type.Glyph, Phase.Moved));
   await flickOnBoard(page);
   await frame(page, { ...contact(15, 5, 1390, 280, Type.Glyph, Phase.Moved, 90), touched: 1 });
-  await page.clock.runFor(700);
-  await expect(page.locator("#blue-prompt")).toHaveText("Goal!");
+  await page.clock.runFor(1400);
+  await expect(page.locator("#orange-prompt")).toHaveText("Goal!");
+  await expect(page.locator("#blue-value")).toHaveText("0");
 });
 
-test("turning the tennis piece changes whether its long base blocks a shot", async ({ page }) => {
+test("a blocker's setup angle determines rebounds and stays fixed after kickoff", async ({ page }) => {
   await openGame(page, true);
   await frame(page, ...lineup, { ...contact(15, 5, 1390, 456, Type.Glyph, Phase.Moved, 270), touched: 1 });
   await flickOnBoard(page);
+  await frame(page, { ...contact(15, 5, 1390, 456, Type.Glyph, Phase.Moved, 0), touched: 1 });
   await page.clock.runFor(800);
   await expect(page.locator("#blue-value")).toHaveText("0");
   await restartBoardMatch(page);
   await frame(page, ...lineup, { ...contact(15, 5, 1390, 456, Type.Glyph, Phase.Moved, 0), touched: 1 });
   await flickOnBoard(page);
+  await frame(page, { ...contact(15, 5, 1390, 456, Type.Glyph, Phase.Moved, 270), touched: 1 });
   await page.clock.runFor(800);
   await expect(page.locator("#blue-value")).toHaveText("1");
 });
@@ -1015,7 +1057,7 @@ for (const timing of ["before focus", "after focus", "without a focus event"]) {
   });
 }
 
-test("a lift just before a long pause keeps its remaining redetection time", async ({ page }) => {
+test("a blocker remains fixed through lost tracking and a long pause", async ({ page }) => {
   await openGame(page, true);
   await frame(page, ...lineup, contact(15, 5, 1390, 540, Type.Glyph, Phase.Moved));
   await flickOnBoard(page);
@@ -1028,7 +1070,7 @@ test("a lift just before a long pause keeps its remaining redetection time", asy
   await expect(page.locator("#orange-prompt")).toHaveText("Goal!");
 });
 
-test("a goalie moved during a paused shot blocks from its new position and ID", async ({ page }) => {
+test("a blocker cannot move into the shot during a pause", async ({ page }) => {
   await openGame(page, true);
   await frame(page, ...lineup);
   await flickOnBoard(page);
@@ -1036,7 +1078,8 @@ test("a goalie moved during a paused shot blocks from its new position and ID", 
   await frame(page, contact(45, 5, 1390, 540));
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await page.clock.runFor(1400);
-  await expect(page.locator("#orange-prompt")).toHaveText("Goal!");
+  await expect(page.locator("#blue-value")).toHaveText("1");
+  await expect(page.locator("#orange-value")).toHaveText("0");
 });
 
 for (const when of ["before focus", "after focus"]) {

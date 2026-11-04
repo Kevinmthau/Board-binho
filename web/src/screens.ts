@@ -345,8 +345,8 @@ export class MatchScreens {
   }
   private rules() {
     return [
-      "Blue and Orange defend opposite goals with four Sports Pieces each.",
-      "Take turns flicking the ball. Slide and turn your defenders on your own half.",
+      "Set four Sports Pieces on each half before kickoff. They stay in place as blockers for the whole match.",
+      "Take turns swiping the ball at each other’s goals. Leave the pieces untouched during play.",
       "A goal scores one point. The team that conceded takes the next kickoff.",
       "First to " +
         this.target +
@@ -357,24 +357,14 @@ export class MatchScreens {
     const rules = this.rules();
     return [
       [
-        "place",
-        "Set your defense",
-        rules[0] + " Use any Sports Pieces. Keep the ball and midfield clear.",
-      ],
-      [
-        "slide",
-        "Cover the goal",
-        "Slide defenders on your half to block a shot. Newly added defenders wait until the ball stops.",
-      ],
-      [
-        "turn",
-        "Change the angle",
-        "Touch and turn a Piece. A shot rebounds from the shape and direction of its base.",
+        "setup",
+        "Set the blockers once",
+        rules[0] + " Use any Sports Pieces and keep the ball and midfield clear. Leave the pieces untouched during play.",
       ],
       [
         "flick",
-        "Flick to shoot",
-        "Blue kicks off. Start on the ball and flick toward the other goal. When it stops, the other player shoots.",
+        "Take turns swiping",
+        "Blue kicks off toward the right goal. Orange aims for the left goal. Start on the ball and swipe. When it stops, the other player shoots from where it rests.",
       ],
       ["score", "Win the match", rules[2] + " " + rules[3]],
     ];
@@ -393,8 +383,6 @@ export class MatchScreens {
     byId("lesson-title").textContent = title;
     byId("lesson-text").textContent = text;
     byId("lesson-clip").dataset.demo = demo;
-    byId<HTMLImageElement>("clip-piece").src =
-      demo === "turn" ? "./piece-art/5.png" : "./piece-art/4.png";
     byId("lesson-dots").textContent = lessons
       .map((_, i) => (i === this.helpPage ? "●" : "○"))
       .join("");
