@@ -1,9 +1,9 @@
 {
   "name": "board-binhoweb",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.1",
   "type": "module",
-  "description": "Board Binho port built with the Board Web SDK.",
+  "description": "Flick Soccer, an offline Board Sports game built with the Board Web SDK.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -20,6 +20,7 @@
     "@board.fun/web-pack": "^1.0.0-beta.3",
     "@playwright/test": "1.62.1",
     "typescript": "^5.4.0",
-    "vite": "^6.4.3"
+    "vite": "^6.4.3",
+    "wawoff2": "2.0.1"
   }
 }

@@ -2,35 +2,172 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-    <title>Board Binho</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <title>Flick Soccer</title>
     <link rel="stylesheet" href="./src/style.css" />
+    <link rel="stylesheet" href="./src/screens.css" />
   </head>
   <body>
-    <canvas id="game-canvas" aria-label="Board Binho playfield"></canvas>
-    <div id="hud" aria-live="polite">
-      <section id="blue-seat" class="seat" aria-label="Blue team">
-        <div class="seat-heading">
-          <img class="setup-piece" src="./piece-art/4.png" alt="" />
-          <span>Blue</span>
-          <strong id="blue-value"></strong>
+    <main id="match-surface" hidden>
+      <canvas id="game-canvas" aria-label="Flick Soccer playfield"></canvas>
+      <div id="hud" aria-live="polite">
+        <section id="blue-seat" class="seat" aria-label="Blue team">
+          <div class="seat-heading">
+            <img class="setup-piece" src="./piece-art/4.png" alt="" /><span
+              >Blue</span
+            ><strong id="blue-value"></strong>
+          </div>
+          <p id="blue-prompt"></p>
+        </section>
+        <section id="orange-seat" class="seat" aria-label="Orange team">
+          <div class="seat-heading">
+            <img class="setup-piece" src="./piece-art/5.png" alt="" /><span
+              >Orange</span
+            ><strong id="orange-value"></strong>
+          </div>
+          <p id="orange-prompt"></p>
+        </section>
+        <span id="match-target"></span>
+        <div id="goal-banner" aria-hidden="true"><span>GOAL!</span></div>
+      </div>
+      <aside id="coach" hidden aria-live="polite">
+        <small id="coach-count"></small><strong id="coach-line"></strong
+        ><span id="coach-dots"></span>
+      </aside>
+      <div id="dev-controls">
+        <button id="auto-setup-button" type="button">Auto setup</button>
+        <button id="reset-button" type="button">Reset</button>
+        <button id="preview-menu" type="button">Match menu</button>
+      </div>
+    </main>
+    <button
+      id="flip"
+      type="button"
+      aria-label="Flip table"
+      aria-pressed="false"
+      hidden
+    >
+      <img src="./ui/flip-button.png" alt="" />
+    </button>
+
+    <main id="screens">
+      <section id="home" class="screen home">
+        <canvas
+          id="home-art"
+          width="1600"
+          height="900"
+          aria-hidden="true"
+        ></canvas>
+        <div class="home-content">
+          <h1>FLICK<br />SOCCER</h1>
+          <button class="primary" id="home-play">Play</button>
+          <button id="home-help">How to Play</button>
         </div>
-        <p id="blue-prompt"></p>
       </section>
-      <section id="orange-seat" class="seat" aria-label="Orange team">
-        <div class="seat-heading">
-          <img class="setup-piece" src="./piece-art/5.png" alt="" />
-          <span>Orange</span>
-          <strong id="orange-value"></strong>
+      <section id="modes" class="screen" hidden>
+        <h2>Game modes</h2>
+        <article id="mode-card" tabindex="0" aria-label="Choose Competitive">
+          <h3 class="mode-pill" data-mode-name></h3>
+          <span>2 players</span>
+          <div class="mode-art" aria-hidden="true">
+            <img src="./piece-art/4.png" alt="" /><b></b
+            ><img src="./piece-art/5.png" alt="" />
+          </div>
+          <button id="mode-play" class="primary">Play</button
+          ><button id="mode-help">How to Play</button>
+        </article>
+        <div class="screen-nav"><button data-back="home">← Back</button></div>
+      </section>
+      <dialog id="mode-dialog">
+        <h2 data-mode-name></h2>
+        <strong>2 players</strong>
+        <ul id="mode-rules"></ul>
+        <div class="dialog-actions">
+          <button id="mode-close">Close</button
+          ><button id="play-tutorial" class="primary">Play Tutorial</button>
         </div>
-        <p id="orange-prompt"></p>
+      </dialog>
+      <section id="players" class="screen" hidden>
+        <h2 data-mode-name></h2>
+        <p class="overline">2 players</p>
+        <div id="roster" aria-label="Selected players"></div>
+        <p id="roster-status" role="status"></p>
+        <div class="screen-nav">
+          <button data-back="modes">← Back</button
+          ><button id="house-rules">House Rules</button
+          ><button class="primary" id="continue">Continue</button>
+        </div>
       </section>
-      <div id="goal-banner" aria-hidden="true"><span>GOAL!!</span><span>GOAL!!</span></div>
-    </div>
-    <div id="dev-controls">
-      <button id="auto-setup-button" type="button">Auto setup</button>
-      <button id="reset-button" type="button">Reset</button>
-    </div>
+      <section id="rules" class="screen" hidden>
+        <p class="overline" data-mode-name></p>
+        <h2>House Rules</h2>
+        <div class="panel">
+          <h3>Goals to win</h3>
+          <div id="rule-options" class="chips"></div>
+          <p id="standard-rule"></p>
+        </div>
+        <div class="screen-nav">
+          <button id="reset-rules">Reset</button
+          ><button class="primary" data-back="players">Done</button>
+        </div>
+      </section>
+      <section id="help" class="screen" hidden>
+        <h2>How to Play</h2>
+        <div class="lesson">
+          <div id="lesson-clip" aria-hidden="true">
+            <i class="pitch-circle"></i><i class="clip-goal"></i
+            ><img id="clip-piece" src="./piece-art/4.png" alt="" /><i
+              class="clip-ball"
+            ></i
+            ><i class="clip-finger"></i>
+          </div>
+          <div>
+            <span class="overline" id="lesson-number"></span>
+            <h3 id="lesson-title"></h3>
+            <p id="lesson-text"></p>
+          </div>
+        </div>
+        <div id="lesson-dots"></div>
+        <div class="screen-nav">
+          <button id="help-back">← Back</button>
+          <div class="nav-group">
+            <button id="help-prev">Prev</button
+            ><button id="help-next">Next</button>
+          </div>
+          <button class="primary" id="help-play">Play</button>
+        </div>
+      </section>
+      <section id="results" class="screen" hidden>
+        <p class="overline"><span data-mode-name></span> · Final whistle</p>
+        <h2 id="winner"></h2>
+        <div class="panel results-panel">
+          <p id="result-score"></p>
+          <p id="result-target"></p>
+        </div>
+        <div class="screen-nav">
+          <button data-back="home">Home</button
+          ><button data-back="modes">Modes</button
+          ><button class="primary" id="again">Play Again</button>
+        </div>
+      </section>
+      <dialog id="preview-pause">
+        <h2>Match menu</h2>
+        <div class="stack">
+          <button data-menu="restart">Restart Match</button
+          ><button data-menu="modes">Back to Mode Select</button
+          ><button data-menu="help">How to Play</button
+          ><button class="primary" data-menu="resume">Resume</button>
+        </div>
+      </dialog>
+      <dialog id="preview-picker">
+        <h2>Choose a player</h2>
+        <div id="preview-choices" class="stack"></div>
+        <button id="picker-close">Cancel</button>
+      </dialog>
+    </main>
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>

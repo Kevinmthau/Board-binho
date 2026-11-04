@@ -1,0 +1,7 @@
+*.png binary
+*.mp3 binary
+*.ogg binary
+*.woff2 binary
+*.tflite binary
+*.tgz binary
+web/public/fonts/OFL.txt -whitespace

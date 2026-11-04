@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This repository is the **Board Web App** version of Board Binho.
+This repository is **Flick Soccer**, a Board Web App.
 
 ## What to assume
 
@@ -9,6 +9,9 @@ This repository is the **Board Web App** version of Board Binho.
 - Track physical piece instances by `contactId`, not `glyphId`.
 - Treat `glyphId` as a piece type identifier only.
 - Always guard SDK calls with `Board.isOnDevice` so browser preview works.
+- The build and packed ZIP must contain no web addresses, including in asset metadata.
+- Keep asset source links in repository documentation and preserve shipped license terms.
+- Touch gates Piece rotation. Menu, tutorial, flip, and profile flows have browser regressions.
 
 ## Project identity
 
@@ -51,3 +54,7 @@ npm run dev
 
 The browser preview uses simulated defenders and pointer swipes; do not fake
 `Board.isOnDevice` in app code.
+
+Use `./scripts/release_webapp.sh` for a versioned release with its freshly
+rendered 1536 × 864 title card. Refer to `PLAN.md` for the standards revision,
+decisions, and remaining hardware checks.

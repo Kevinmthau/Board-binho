@@ -15,6 +15,11 @@ const lineup = [
 ];
 
 async function openGame(page: Page, board = false) {
+  await page.addInitScript(() => {
+    localStorage.setItem("flick-soccer:tutorial-groups", JSON.stringify([
+      JSON.stringify(["browser-blue", "browser-orange"]), JSON.stringify(["test-blue", "test-orange"]),
+    ]));
+  });
   // The test host implements just the native wire interface. The actual
   // vendored SDK must translate frames and remove Ended/Canceled contacts.
   if (board) {
@@ -22,6 +27,10 @@ async function openGame(page: Page, board = false) {
       Object.assign(window, {
         BoardSDK: {
           setPauseContext() {},
+          getPlayers() { return JSON.stringify([
+            { playerId:"test-blue", sessionId:1, name:"Blue", type:"profile", avatarId:"0" },
+            { playerId:"test-orange", sessionId:2, name:"Orange", type:"profile", avatarId:"0" },
+          ]); },
           quit() { document.documentElement.dataset.quit = "true"; },
         },
         boardTouch: { postMessage() {} },
@@ -32,6 +41,13 @@ async function openGame(page: Page, board = false) {
   await page.clock.install({ time: new Date("2026-01-01T12:00:00Z") });
   await page.clock.pauseAt(new Date("2026-01-01T12:00:01Z"));
   await page.goto("/");
+  await page.locator("#home-play").click();
+  await page.locator("#mode-play").click();
+  if (!board) {
+    await page.getByRole("button", { name: "Add player" }).click();
+    await page.locator("#preview-choices").getByRole("button", { name: "Orange", exact: true }).click();
+  }
+  await page.locator("#continue").click();
   await page.clock.runFor(32);
   await expect(page.locator("#blue-value")).toHaveText("0/4");
 }
@@ -866,7 +882,7 @@ test("the goal banner and cheer pause and resume with the match", async ({ page 
   await frame(page, ...lineup);
   await flickOnBoard(page);
   await page.clock.runFor(550);
-  const audio = page.locator("audio");
+  const audio = page.locator('audio[src$="crowd-cheer.mp3"]');
   await expect(audio).toHaveJSProperty("paused", false);
   await page.evaluate(() => window.dispatchEvent(new Event("blur")));
   await expect(audio).toHaveJSProperty("paused", true);
@@ -890,19 +906,19 @@ test("a sliding defender no longer blocks the empty space it left", async ({ pag
   await openGame(page, true);
   await frame(page, ...lineup, contact(15, 5, 1390, 540, Type.Glyph, Phase.Moved));
   await flickOnBoard(page);
-  await frame(page, contact(15, 5, 1390, 280, Type.Glyph, Phase.Moved, 90));
+  await frame(page, { ...contact(15, 5, 1390, 280, Type.Glyph, Phase.Moved, 90), touched: 1 });
   await page.clock.runFor(700);
   await expect(page.locator("#blue-prompt")).toHaveText("Goal!");
 });
 
 test("turning the tennis piece changes whether its long base blocks a shot", async ({ page }) => {
   await openGame(page, true);
-  await frame(page, ...lineup, contact(15, 5, 1390, 456, Type.Glyph, Phase.Moved, 270));
+  await frame(page, ...lineup, { ...contact(15, 5, 1390, 456, Type.Glyph, Phase.Moved, 270), touched: 1 });
   await flickOnBoard(page);
   await page.clock.runFor(800);
   await expect(page.locator("#blue-value")).toHaveText("0");
   await restartBoardMatch(page);
-  await frame(page, ...lineup, contact(15, 5, 1390, 456, Type.Glyph, Phase.Moved, 0));
+  await frame(page, ...lineup, { ...contact(15, 5, 1390, 456, Type.Glyph, Phase.Moved, 0), touched: 1 });
   await flickOnBoard(page);
   await page.clock.runFor(800);
   await expect(page.locator("#blue-value")).toHaveText("1");
@@ -999,7 +1015,7 @@ test("placement checks the rotated tennis base at midfield, the rail and the kic
   const count = page.locator("#blue-value");
   await expect(count).toHaveText("4/4");
   const move = (x: number, y: number, angle: number) =>
-    frame(page, contact(14, 5, x, y, Type.Glyph, Phase.Moved, angle));
+    frame(page, { ...contact(14, 5, x, y, Type.Glyph, Phase.Moved, angle), touched: 1 });
   await move(880, 300, 180);
   await expect(count).toHaveText("3/4");
   await move(320, 70, 0);
@@ -1042,6 +1058,9 @@ test("a faster release completes the same shot on either side of the arming thre
 
 test("the ball remains visible when a kickoff stops under Orange's turn prompt", async ({ page }) => {
   await openGame(page, true);
+  // Put the HUD over this shot's resting place to exercise overlap handling
+  // independently of the default HUD layout.
+  await page.addStyleTag({ content: '.board-device #orange-seat { top: auto; bottom: 2.5vh; right: 2.5vw; }' });
   await frame(page, ...lineup);
   const angle = 75 * Math.PI / 180;
   const x = 960 + 110 * Math.cos(angle);

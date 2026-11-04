@@ -1,0 +1,57 @@
+# Flick Soccer
+
+Build a fully offline, two-person Board Sports game with physical defenders and
+finger flicks. Keep the existing app and package IDs so installed copies update
+in place.
+
+## Decisions
+
+The mode is COMPETITIVE. Shots alternate between two human players. Four Sports
+Pieces defend each half. The standard match ends at three goals. House Rules
+offer one, three, five, or seven goals.
+
+The visual direction is sports, racing, and arcade. The font shortlist from
+the approved catalog was Fugaz One, Racing Sans One, and Bungee. Fugaz One was
+selected for its italic sports lettering. Its shipped metadata uses the family
+name Board Game Font because the original reserves its name.
+
+The home screen and title card use separate compositions from the same
+canvas artwork. The home reserves space for PLAY and HOW TO PLAY. Real Sports
+renders appear in help, practice, and browser play.
+
+The standard screen flow, OS player picker, remembered house rules, animated
+help, four-step Piece tutorial, results, Board menu, and table flip are
+implemented. A tutorial is remembered for the selected set of profile IDs.
+Guests and AI IDs do not enter the key. This release supports human players.
+
+## Verification
+
+The browser suite covers the normal menu flow, native Board input, canceled
+contacts, pause and resume, tracker recovery, physics, tutorial retries and
+profile groups, house rules, results, rotation touch gating, and flipped input.
+An offline test serves the production files from disk with the browser network
+disabled, then plays through a goal to the results screen.
+
+Every package is checked before it replaces the previous ZIP. The scan includes
+all files, UTF-16 strings, compressed PNG metadata, and decoded WOFF2 fonts.
+Source links are kept in repository documentation.
+
+The standards pass uses revision f00b6e018eb5ebf9569fc2c59e5a62f3325e00d6 of
+[board-game-standards](https://github.com/Harris-Hill/board-game-standards/blob/f00b6e018eb5ebf9569fc2c59e5a62f3325e00d6/BOARD_GAME_DESIGN_STANDARDS.md).
+
+## Remaining checks
+
+Check feel and sustained frame rate with two people and real Pieces on a Board.
+Campaign saves and AI difficulty levels apply when those modes are introduced.
+The current GitHub remote belongs to Kevinmthau. The standards call for a
+private Harris-Hill repository.
+
+## Development and release
+
+Use `cd web && npm run dev` for browser play. Hover over a simulated Piece and
+press R to turn it. Use the browser Match menu for pause and help.
+
+Use `./scripts/release_webapp.sh` for a new versioned release. It renders the
+current 1536 × 864 title card, runs the tests, builds and checks the package,
+and creates a new release folder. Increase the package version for the next
+release. Use `./scripts/build_webapp.sh --install` for a Board installation.

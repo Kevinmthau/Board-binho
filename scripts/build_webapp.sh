@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GAME_NAME="Board Binho"
+GAME_NAME="Flick Soccer"
 PACKAGE_ID="com.defaultcompany.boardbinhoweb"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WEB_DIR="$ROOT_DIR/web"
@@ -154,13 +154,14 @@ log "Packing Board web app."
         --name "$GAME_NAME" \
         --sdk-version "$sdk_version" \
         --model model.tflite \
-        --icon assets/board-binho-cover.png \
+        --icon assets/flick-soccer-cover.png \
         --out "$temporary_zip"
 )
 
 app_id="$(read_app_id)" || fail "web-pack did not create a valid board.config.json."
 output_webapp="$OUTPUT_DIR/$app_id.webapp.zip"
-unzip -tq "$temporary_zip" >/dev/null || fail "Packed web app failed zip validation."
+unzip -q "$temporary_zip" -d "$temporary_dir/unpacked" || fail "Packed web app failed zip validation."
+node "$WEB_DIR/scripts/check-offline.mjs" "$DIST_DIR" "$temporary_dir/unpacked"
 mv "$temporary_zip" "$output_webapp"
 rm -rf "$temporary_dir"
 trap - EXIT

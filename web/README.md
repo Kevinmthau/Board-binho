@@ -1,4 +1,4 @@
-# Board Binho Web App
+# Flick Soccer Web App
 
 This directory contains the Vite and TypeScript game source.
 
@@ -10,6 +10,7 @@ npm run dev
 ```
 
 Click to place four Sports defenders on each half, or choose **Auto setup**.
+Drag a piece to reposition it. Hover over it and press R to turn it.
 Drag from the ball to shoot. The browser uses pointer input and draws the
 Sports pieces. Board hardware uses the physical pieces and SDK finger input.
 
@@ -38,3 +39,14 @@ assets resolve from the Board bundle root.
 The Board Studio SDK payload is vendored at
 `../vendor/board.fun-web-sdk-1.0.0-beta.6.tgz` and installed as
 `@board.fun/web-sdk`.
+
+## Asset credits
+
+The physics engine is [Matter.js](https://brm.io/matter-js/). Its MIT license is
+included in the bundled JavaScript. The goal sound is an excerpt of
+[Crowd Cheer 5 by Krizin](https://freesound.org/people/Krizin/sounds/651646/),
+released under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+The game ships the audio and its credit locally.
+
+The complete provenance, font changes, and local license paths are recorded
+in `../docs/ASSET-MANIFEST.md`.

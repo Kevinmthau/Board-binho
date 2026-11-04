@@ -1,9 +1,14 @@
-# Board Binho Web
+# Flick Soccer
 
-Board Binho is a Vite and TypeScript canvas game for Board. It uses the Board
+Flick Soccer is a Vite and TypeScript canvas game for Board. It uses the Board
 Web SDK for physical defenders and finger shots and ships as a `.webapp.zip`.
 
 ## Play
+
+Choose PLAY, COMPETITIVE, and two players from the Board profile picker.
+House Rules offers a goal target of 1, 3, 5, or 7. The standard is 3.
+The first match for each group starts with an interactive Piece tutorial.
+HOW TO PLAY explains the game with animated pages. PLAY TUTORIAL repeats practice.
 
 Use one Board Sports set. Blue defends the left goal and Orange defends the
 right. Place any four of the eight Sports pieces on each half. Leave room
@@ -11,7 +16,9 @@ around each base and keep the center spot clear. Each side shows its count.
 
 Blue takes the first shot. Flick the ball toward the other goal. When the ball
 stops, the turn passes to the other side. After a goal, the team that conceded
-kicks off from the center. Restart a match from the Board pause menu.
+kicks off from the center. The first team to the chosen goal target wins.
+Restart, return to modes, or open How to Play from the Board pause menu.
+Touch a Piece while turning it. The flip button turns the table view.
 
 ## Layout
 
@@ -39,6 +46,19 @@ application identity, saves, and profiles stable across future builds.
 The script installs web dependencies when needed, builds `web/dist`, runs
 `web-pack`, validates the archive, and writes the final bundle under
 `Builds/Web/`.
+
+It scans every shipped file for web addresses, including binary metadata
+and compressed fonts. Source links live in `docs/ASSET-MANIFEST.md`.
+
+Create a versioned release with its 1536 × 864 title card and install notes:
+
+```bash
+./scripts/release_webapp.sh
+```
+
+Releases go into a new `releases/Flick-Soccer-v<version>/` directory.
+The script renders the current title card and runs the test suite before
+packing. Increase `web/package.json`'s version before the next release.
 
 To reuse an existing Vite build:
 
@@ -80,7 +100,8 @@ npm run dev
 ```
 
 Click each half to place its four pieces, or select **Auto setup**. Drag a
-piece to reposition it. Drag across the ball from its center to shoot.
+piece to reposition it. Hover over a piece and press **R** to turn it.
+Drag across the ball from its center to shoot.
 
 Run the browser and SDK input regression tests in `web` with Node.js 20 or newer.
 

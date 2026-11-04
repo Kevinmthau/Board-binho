@@ -6,6 +6,10 @@ import {
 } from "@board.fun/web-sdk";
 import Matter from "matter-js";
 import { subscribeToBoardFrames, type BoardFrameChanges, type FingerTrace } from "./board-input";
+import { cancelBoardControls, routeBoardControls, wireNativeClicks } from "./board-controls";
+import { MatchScreens, byId } from "./screens";
+import { PieceLesson } from "./piece-lesson";
+import { GAME_NAME, readLocal, writeLocal } from "./match-settings";
 import { BOARD_HEIGHT, BOARD_WIDTH, FIELD_WORLD_HEIGHT, createSportsBumper, sportsPieces, type SportsPiece } from "./sports";
 
 type Vec = {
@@ -21,6 +25,8 @@ type DefenderContact = {
   piece: SportsPiece;
   position: Vec;
   angle: number;
+  isTouched?: boolean;
+  touchStarted?: boolean;
 };
 
 type Defender = {
@@ -202,19 +208,35 @@ const pointerDefenderDrags = new Map<number, number>();
 const ballTrail: Vec[] = [];
 
 let nextSimulatedContactId = 1000;
+let screens: MatchScreens;
+let lesson: PieceLesson | undefined;
+let flipped = false;
+let hoverWorld: Vec | undefined;
+let rosterPollAt = 0;
+let visualTime = 0;
+let soundLevel = clamp(Number(readLocal("volume", 75)), 0, 100);
+const pieceAngles = new Map<number, number>();
+const detectionFx: { position: Vec; radius: number; time: number; side: number; glyph: number }[] = [];
+let visiblePieceIds = new Set<number>();
+const cueAudio = { piece: new Audio("./sfx/piece.ogg"), flick: new Audio("./sfx/flick.ogg") };
+goalCheerAudio.volume = GOAL_CHEER_VOLUME * soundLevel / 100;
 
 document.body.classList.toggle("board-device", Board.isOnDevice);
 document.body.classList.toggle("browser-preview", !Board.isOnDevice);
 
+screens = new MatchScreens({ start: startMatch, flip: flipTable, changed: screenChanged });
 resize();
 buildPhysicsWorld();
 wireControls();
 wirePointerFallback();
 wireBoard();
+syncSuspension();
 requestAnimationFrame(frame);
 
 function wireControls(): void {
   window.addEventListener("resize", resize);
+  window.addEventListener("pagehide", () => { windowBlurred = true; syncSuspension(); });
+  window.addEventListener("pageshow", () => { windowBlurred = false; nativeSurfacePaused = false; syncSuspension(); });
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) nativeSurfacePaused = false;
     syncSuspension();
@@ -230,10 +252,97 @@ function wireControls(): void {
   });
   autoSetupButton.addEventListener("click", autoSetupDefenders);
   resetButton.addEventListener("click", resetMatch);
+  document.addEventListener("click", (event) => {
+    if ((event.target as HTMLElement).closest("button")) cue("piece", .24);
+  });
+}
+
+function cue(kind: keyof typeof cueAudio, gain: number) {
+  if (windowBlurred || document.hidden || nativeSurfacePaused || soundLevel === 0) return;
+  const audio = cueAudio[kind];
+  audio.currentTime = 0;
+  audio.volume = gain * soundLevel / 100;
+  audio.playbackRate = kind === "piece" ? .94 + Math.random() * .12 : 1;
+  void audio.play().catch(() => {});
+}
+
+function screenChanged() {
+  if (!screens) return;
+  CancelActiveShot();
+  pointerDefenderDrags.clear();
+  lesson?.cancelFingers();
+  accumulatorMs = 0;
+  lastFrameTimestamp = performance.now();
+  document.body.classList.toggle("match-menu-open", !screens.playing);
+  syncSuspension();
+  configureBoardMenu();
+}
+
+function startMatch(teach: boolean) {
+  // A new match cannot consume a native resume as a duplicate of player selection.
+  lastBoardResumeAt = -Infinity;
+  lesson = teach ? new PieceLesson(Board.isOnDevice, () => {
+    screens.tutorialComplete();
+    lesson = undefined;
+    document.body.classList.remove("tutorial");
+    byId("coach").hidden = true;
+    resetMatch();
+  }) : undefined;
+  document.body.classList.toggle("tutorial", teach);
+  byId("coach").hidden = !teach;
+  detectionFx.length = 0;
+  visiblePieceIds.clear();
+  resetMatch();
+}
+
+function flipTable() {
+  if (!screens.playing) return;
+  flipped = !flipped;
+  byId("match-surface").classList.toggle("flipped", flipped);
+  byId("flip").setAttribute("aria-pressed", String(flipped));
+  CancelActiveShot();
+  lesson?.cancelFingers();
+  pointerDefenderDrags.clear();
+  if (Board.isOnDevice) {
+    // The glass did not move. Reproject stationary pieces as soon as the view turns.
+    const opposite = (side: PlayerSide): PlayerSide => side === "left" ? "right" : "left";
+    const mirror = (contact: DefenderContact): DefenderContact => ({
+      ...contact, position: scaleVector(contact.position, -1), angle: contact.angle + Math.PI,
+    });
+    latestBoardGlyphs = new Map([...latestBoardGlyphs].map(([id, contact]) => [id, mirror(contact)]));
+    for (const defender of defenders.values()) {
+      defender.side = opposite(defender.side);
+    }
+    for (const lift of liftedDefenders) {
+      lift.side = opposite(lift.side); lift.position = scaleVector(lift.position, -1);
+    }
+    for (const substitute of staleBoardIds.values()) if (substitute) substitute.side = opposite(substitute.side);
+    if (boardRecovery) {
+      boardRecovery.baseline = new Map([...boardRecovery.baseline].map(([id, contact]) => [id, mirror(contact)]));
+      const counts = boardRecovery.countsBeforePause;
+      boardRecovery.countsBeforePause = { left: counts.right, right: counts.left };
+      boardRecovery.occupiedSides = new Set([...boardRecovery.occupiedSides].map(opposite));
+      for (const renewal of boardRecovery.renewals.values()) if (renewal.side) renewal.side = opposite(renewal.side);
+      for (const candidate of boardRecovery.setupCandidates.values()) {
+        candidate.contact = mirror(candidate.contact);
+        for (const original of candidate.originals) if (original.side) original.side = opposite(original.side);
+      }
+    }
+    for (const fx of detectionFx) {
+      fx.position = scaleVector(fx.position, -1); fx.side = 1-fx.side;
+    }
+    updateDefenders(latestBoardGlyphs);
+  }
 }
 
 function syncSuspension(): void {
-  setSuspended(windowBlurred || document.hidden || nativeSurfacePaused);
+  const foregroundLost = windowBlurred || document.hidden || nativeSurfacePaused;
+  document.body.classList.toggle("foreground-paused", foregroundLost);
+  if (foregroundLost) {
+    cancelBoardControls();
+    for (const audio of Object.values(cueAudio)) audio.pause();
+  }
+  setSuspended(foregroundLost || !screens.playing);
 }
 
 function setSuspended(value: boolean): void {
@@ -242,6 +351,9 @@ function setSuspended(value: boolean): void {
   surfaceCancellation = null;
   document.body.classList.toggle("match-suspended", value);
   if (value) {
+    cancelBoardControls();
+    lesson?.cancelFingers();
+    for (const audio of Object.values(cueAudio)) audio.pause();
     cheerPausedWithMatch = !goalCheerAudio.paused && !goalCheerAudio.ended;
     if (cheerPausedWithMatch) goalCheerAudio.pause();
   } else if (cheerPausedWithMatch) {
@@ -304,19 +416,32 @@ function finishMenuReconciliation(now: number): void {
   updateDefenders(latestBoardGlyphs, true);
 }
 
-function wireBoard(): void {
-  if (!Board.isOnDevice) {
-    return;
-  }
-
+function configureBoardMenu(): void {
+  if (!Board.isOnDevice) return;
   Board.pause.setContext({
-    gameName: "Board Binho",
+    gameName: GAME_NAME,
     offerSaveOption: false,
-    customButtons: [{ id: "restart", title: "Restart", icon: "circulararrow" }],
+    audioTracks: [{ id: "effects", name: "Sound effects", value: soundLevel }],
+    customButtons: screens?.screen === "match" ? [
+      { id: "restart", title: "Restart Match", icon: "circular_arrow" },
+      { id: "modes", title: "Back to Mode Select", icon: "left_arrow" },
+      { id: "help", title: "How to Play", icon: "question_mark" },
+    ] : [],
   });
+}
+function wireBoard(): void {
+  if (!Board.isOnDevice) return;
+  configureBoardMenu();
+  wireNativeClicks();
   subscribeToBoardFrames(handleBoardContacts);
 
   Board.pause.onResult((result) => {
+    const volume = result.audioTracks?.find((track) => track.id === "effects");
+    if (volume) {
+      soundLevel = clamp(volume.value, 0, 100);
+      writeLocal("volume", soundLevel); goalCheerAudio.volume = GOAL_CHEER_VOLUME * soundLevel / 100;
+      configureBoardMenu();
+    }
     if (result.action === "quit" || result.action === "save_and_quit") {
       Board.application.quit();
       return;
@@ -326,13 +451,13 @@ function wireBoard(): void {
     windowBlurred = false;
     nativeSurfacePaused = false;
     syncSuspension();
-    if (result.action === "custom_button" && result.customButtonId === "restart") {
-      resetMatch();
-    }
+    if (result.action === "custom_button" && result.customButtonId) screens.menu(result.customButtonId);
   });
 }
 
 function handleBoardContacts(contacts: readonly BoardContact[], reported: BoardFrameChanges): void {
+  const wasPlaying = screens.playing;
+  const buttons = windowBlurred || document.hidden || nativeSurfacePaused ? new Set<number>() : routeBoardControls(reported);
   const next = new Map<number, DefenderContact>();
   const fingerContacts: BoardContact[] = [];
   const now = performance.now();
@@ -349,21 +474,38 @@ function handleBoardContacts(contacts: readonly BoardContact[], reported: BoardF
     if (isActiveContactPhase(contact.phase)) liveBoardContactIds.add(contact.contactId);
     const piece = sportsPieces.get(contact.glyphId);
     if (contact.type === BoardContactType.Glyph && piece && isActiveContactPhase(contact.phase)) {
+      if (!pieceAngles.has(contact.contactId) || reported.get(contact.contactId)?.began || contact.isTouched) {
+        pieceAngles.set(contact.contactId, -contact.orientation * Math.PI / 180);
+      }
       next.set(contact.contactId, {
         contactId: contact.contactId,
         piece,
         position: boardContactWorldPosition(contact),
-        angle: -contact.orientation * Math.PI / 180,
+        angle: pieceAngles.get(contact.contactId)! + (flipped ? Math.PI : 0),
+        isTouched: contact.isTouched,
+        touchStarted: contact.isTouched && !latestBoardGlyphs.get(contact.contactId)?.isTouched,
       });
     } else if (contact.type === BoardContactType.Finger && contact.glyphId === 0) {
       fingerContacts.push(contact);
     }
   }
 
+  for (const id of pieceAngles.keys()) if (!liveBoardContactIds.has(id)) pieceAngles.delete(id);
   // The last defender can land or lift in the same snapshot as a flick.
   applyBoardRoster(next, reported, previousLiveIds);
-  if (!suspended) handleBoardFingerShotInput(fingerContacts.filter((finger) => !staleBoardIds.has(finger.contactId)),
-    now / 1000, Math.min(frameSeconds, SWIPE_SAMPLE_WINDOW_SECONDS), reported);
+  if (suspended || !wasPlaying || !screens.playing) return;
+  const gameChanges = buttons.size ? new Map([...reported].filter(([id]) => !buttons.has(id))) : reported;
+  if (lesson) {
+    for (const [id, change] of gameChanges) for (const trace of change.fingerTraces ?? []) {
+      for (const [i, p] of trace.points.entries()) lesson.finger(id, logicalPoint(p.x / BOARD_WIDTH, p.y / BOARD_HEIGHT), trace.began && !i ? "down" : "move");
+      if (trace.terminal !== undefined) {
+        const last = trace.releasePosition ?? trace.points[trace.points.length - 1];
+        if (last) lesson.finger(id, logicalPoint(last.x / BOARD_WIDTH, last.y / BOARD_HEIGHT), trace.terminal === BoardContactPhase.Ended ? "up" : "cancel");
+        else lesson.finger(id, { x:0, y:0 }, "cancel");
+      }
+    }
+  } else handleBoardFingerShotInput(fingerContacts.filter((finger) => !buttons.has(finger.contactId) && !staleBoardIds.has(finger.contactId)),
+    now / 1000, Math.min(frameSeconds, SWIPE_SAMPLE_WINDOW_SECONDS), gameChanges);
 }
 
 function updateBoardSuspension(contacts: readonly BoardContact[], reported: BoardFrameChanges, now: number): void {
@@ -752,15 +894,19 @@ function replayFingerTrace(id: number, trace: FingerTrace, now: number, frameSec
 }
 
 function wirePointerFallback(): void {
-  if (Board.isOnDevice) return;
-
   for (const piece of sportsPieces.values()) {
     const image = new Image();
     image.src = `piece-art/${piece.glyphId}.png`;
     previewArt.set(piece.glyphId, image);
   }
+  if (Board.isOnDevice) return;
   canvas.addEventListener("pointerdown", (event) => {
+    if (!screens.playing || suspended) return;
     const worldPosition = pointerWorldPosition(event);
+    if (lesson && lesson.step >= 3) {
+      lesson.finger(event.pointerId, pointerFraction(event), "down");
+      canvas.setPointerCapture(event.pointerId); return;
+    }
 
     if (CanLaunchSwipe() && distance(worldPosition, getBallPosition()) <= layout.ballSwipeCaptureRadius) {
       canvas.setPointerCapture(event.pointerId);
@@ -781,7 +927,10 @@ function wirePointerFallback(): void {
   });
 
   canvas.addEventListener("pointermove", (event) => {
+    if (!screens.playing || suspended) return;
     const worldPosition = pointerWorldPosition(event);
+    hoverWorld = worldPosition;
+    lesson?.finger(event.pointerId, pointerFraction(event), "move");
     const draggedContactId = pointerDefenderDrags.get(event.pointerId);
     if (draggedContactId !== undefined) {
       moveBrowserDefender(draggedContactId, worldPosition);
@@ -803,6 +952,7 @@ function wirePointerFallback(): void {
   });
 
   const finishPointer = (event: PointerEvent): void => {
+    lesson?.finger(event.pointerId, pointerFraction(event), event.type === "pointerup" ? "up" : "cancel");
     if (event.type === "pointerup") {
       finishSwipeContact(
         pointerSwipeContacts,
@@ -820,6 +970,15 @@ function wirePointerFallback(): void {
   canvas.addEventListener("pointerup", finishPointer);
   canvas.addEventListener("pointercancel", finishPointer);
   canvas.addEventListener("lostpointercapture", finishPointer);
+  window.addEventListener("keydown", (event) => {
+    if (event.key.toLowerCase() !== "r" || !hoverWorld || !screens.playing || suspended) return;
+    const contact = [...simulatedContacts.values()].find((p) => distance(p.position, hoverWorld!) < p.piece.radius * 1.5);
+    if (contact) {
+      contact.angle += Math.PI / 6;
+      updateDefenders(simulatedContacts);
+      event.preventDefault();
+    }
+  });
 }
 
 function updateSwipeState(
@@ -902,6 +1061,9 @@ function resetSwipePeak(state: SwipeContactState): void {
 }
 
 function frame(timestamp: number): void {
+  if (timestamp >= rosterPollAt && !windowBlurred && !document.hidden && !nativeSurfacePaused) {
+    rosterPollAt = timestamp + 700; screens.refreshIfWaiting();
+  }
   if (suspended || timestamp < resumeShotAt) {
     lastFrameTimestamp = timestamp;
     if (!suspended) render();
@@ -910,6 +1072,15 @@ function frame(timestamp: number): void {
   }
   const deltaMs = clamp(timestamp - Math.max(lastFrameTimestamp, resumeShotAt), 0, 100);
   lastFrameTimestamp = timestamp;
+  if (!screens.playing) {
+    requestAnimationFrame(frame); return;
+  }
+  visualTime += deltaMs;
+  if (lesson) {
+    lesson.tick(deltaMs);
+    render();
+    requestAnimationFrame(frame); return;
+  }
   accumulatorMs += deltaMs;
 
   updateTimers(deltaMs / 1000);
@@ -930,6 +1101,11 @@ function updateTimers(deltaSeconds: number): void {
 
   goalPauseTimer += deltaSeconds;
   if (goalPauseTimer >= GOAL_PAUSE_DURATION) {
+    if (Math.max(leftScore, rightScore) >= screens.target) {
+      goalPauseTimer = 0;
+      screens.results(leftScore, rightScore);
+      return;
+    }
     goalPauseTimer = 0;
     ResetBallToCenter();
     currentTurn = lastScoringSide === "left" ? "right" : "left";
@@ -1206,6 +1382,20 @@ function updateDefenders(
     }
     if (body.angle !== contact.angle) Matter.Body.setAngle(body, contact.angle);
   }
+  if (screens?.playing) {
+    for (const [id, contact] of contacts) if (!visiblePieceIds.has(id) || updates?.reported.get(id)?.began) {
+      detectionFx.push({ position: { ...contact.position }, radius: contact.piece.radius, time: visualTime,
+        side: contact.position.x < 0 ? 0 : 1, glyph: contact.piece.glyphId });
+      if (detectionFx.length > 24) detectionFx.shift();
+      cue("piece", .25);
+    }
+  }
+  visiblePieceIds = new Set(contacts.keys());
+  if (lesson && screens.playing && !suspended) lesson.contacts([...contacts.values()].map((p) => {
+    const screen = worldToScreen(p.position);
+    return { id:p.contactId, x:screen.x/layout.cssWidth, y:screen.y/layout.cssHeight, angle:p.angle,
+      touchStarted:p.touchStarted, glyph:p.piece.glyphId };
+  }));
   UpdateMatchPhaseFromPlacements();
 }
 
@@ -1231,7 +1421,7 @@ function UpdateMatchPhaseFromPlacements(): void {
 }
 
 function CanLaunchSwipe(): boolean {
-  if (suspended || phase === "setup" || phase === "goalPause") {
+  if (!screens.playing || lesson || suspended || phase === "setup" || phase === "goalPause") {
     return false;
   }
 
@@ -1312,6 +1502,7 @@ function LaunchShot(impulse: Vec): void {
   }
 
   didServeInitialKickoff = true;
+  cue("flick", .45);
   CancelActiveShot();
   ballInPlay = true;
   const deltaV = scaleVector(impulse, MATTER_SHOT_VELOCITY_SCALE);
@@ -1412,6 +1603,7 @@ function RegisterGoal(scorer: PlayerSide): void {
 }
 
 function playGoalCheer(fromStart = true): void {
+  if (!screens.playing || soundLevel === 0) return;
   try {
     if (fromStart) {
       goalCheerAudio.pause();
@@ -1737,8 +1929,22 @@ function render(): void {
   renderField();
   renderTrail();
   renderDefenders();
-  renderBall();
+  renderDetections();
+  if (lesson) lesson.draw(ctx, layout.cssWidth, layout.cssHeight, previewArt.get(4));
+  else renderBall();
   renderUi();
+}
+
+function renderDetections(): void {
+  for (let i = detectionFx.length - 1; i >= 0; i--) {
+    const fx = detectionFx[i], age = (visualTime-fx.time)/520;
+    if (age >= 1) { detectionFx.splice(i,1); continue; }
+    const p = worldToScreen(fx.position);
+    ctx.save();
+    ctx.globalAlpha = 1-age; ctx.strokeStyle = fx.side ? RIGHT_COLOR : LEFT_COLOR;
+    ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x,p.y,fx.radius*layout.pixelScale*(1+age*.8),0,Math.PI*2); ctx.stroke();
+    ctx.restore();
+  }
 }
 
 function renderField(): void {
@@ -1762,7 +1968,14 @@ function renderField(): void {
 
 function renderDefenders(): void {
   // Physical pieces are their own markers. Only the browser needs stand-ins.
-  if (Board.isOnDevice) return;
+  if (Board.isOnDevice) {
+    for (const { body, piece, side } of defenders.values()) {
+      const p = worldToScreen(body.position);
+      ctx.save(); ctx.strokeStyle = side === "left" ? LEFT_COLOR : RIGHT_COLOR; ctx.globalAlpha=.28;
+      ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x,p.y,piece.radius*layout.pixelScale,0,Math.PI*2);ctx.stroke();ctx.restore();
+    }
+    return;
+  }
   for (const { body, piece, side } of defenders.values()) {
     const point = worldToScreen(body.position);
     ctx.save();
@@ -1834,6 +2047,9 @@ function getSeatHud(color: string) {
 function renderUi(): void {
   for (const side of ["left", "right"] as const) {
     const { panel, value, prompt } = seatHud[side];
+    const name = panel.querySelector(".seat-heading span")!;
+    const label = screens.names[side === "left" ? 0 : 1] + (side === "left" ? " ●" : " ▲");
+    if (name.textContent !== label) name.textContent = label;
     const count = kickoffCount(side);
     const score = side === "left" ? leftScore : rightScore;
     const number = didServeInitialKickoff ? String(score) : `${count}/${DEFENDERS_PER_SIDE}`;
@@ -1863,7 +2079,7 @@ function getSeatPrompt(side: PlayerSide, count: number): string {
       return count === DEFENDERS_PER_SIDE ? "Team ready" : `Place any ${DEFENDERS_PER_SIDE} Sports pieces on your half.`;
     case "readyToShoot":
       if (side === currentTurn) return "Flick the ball";
-      return currentTurn === "left" ? "Blue to shoot" : "Orange to shoot";
+      return screens.names[currentTurn === "left" ? 0 : 1] + " to shoot";
     case "ballInMotion":
       return "Ball in play";
     case "goalPause":
@@ -1911,18 +2127,23 @@ function screenToWorld(position: Vec): Vec {
 
 function pointerWorldPosition(event: PointerEvent): Vec {
   const rect = canvas.getBoundingClientRect();
+  const p = logicalPoint((event.clientX-rect.left)/rect.width, (event.clientY-rect.top)/rect.height);
   return screenToWorld({
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top,
+    x: p.x * layout.cssWidth,
+    y: p.y * layout.cssHeight,
   });
 }
 
 function boardContactWorldPosition(contact: Pick<BoardContact, "x" | "y">): Vec {
+  const p = logicalPoint(contact.x/BOARD_WIDTH, contact.y/BOARD_HEIGHT);
   return screenToWorld({
-    x: contact.x * layout.cssWidth / BOARD_WIDTH,
-    y: contact.y * layout.cssHeight / BOARD_HEIGHT,
+    x: p.x * layout.cssWidth,
+    y: p.y * layout.cssHeight,
   });
 }
+
+function logicalPoint(x: number, y: number): Vec { return flipped ? { x:1-x, y:1-y } : { x,y }; }
+function pointerFraction(event: PointerEvent): Vec { return logicalPoint(event.clientX/innerWidth, event.clientY/innerHeight); }
 
 function isActiveContactPhase(phaseValue: BoardContactPhase): boolean {
   return (
