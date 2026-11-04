@@ -2,7 +2,6 @@
 set -euo pipefail
 
 GAME_NAME="Board Binho"
-SLUG="board-binho"
 PACKAGE_ID="com.defaultcompany.boardbinhoweb"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WEB_DIR="$ROOT_DIR/web"
@@ -125,8 +124,10 @@ done
 [[ -f "$MODEL_PATH" ]] || fail "Missing touch model at $MODEL_PATH."
 
 if [[ "$build_web" == true ]]; then
-    if [[ ! -d "$WEB_DIR/node_modules" ]]; then
-        log "Installing web dependencies."
+    installed_lock="$WEB_DIR/node_modules/.package-lock.json"
+    if [[ ! -f "$installed_lock" || "$WEB_DIR/package-lock.json" -nt "$installed_lock" ]] ||
+        ! (cd "$WEB_DIR" && npm ls --depth=0 --silent >/dev/null 2>&1); then
+        log "Synchronizing web dependencies with package-lock.json."
         (cd "$WEB_DIR" && npm ci)
     fi
 
@@ -136,11 +137,12 @@ fi
 
 [[ -f "$DIST_DIR/index.html" ]] || fail "Missing web/dist/index.html. Build without --skip-web-build first."
 [[ -f "$DIST_DIR/model.tflite" ]] || fail "The Vite build did not copy model.tflite into web/dist."
+cmp -s "$MODEL_PATH" "$DIST_DIR/model.tflite" || fail "The built touch model is stale. Rebuild without --skip-web-build."
 
 web_pack_bin="$(resolve_web_pack)" || fail "web-pack not found. Run npm ci or set WEB_PACK_BIN."
 sdk_version="$(read_sdk_version)" || fail "Could not read the installed Board Web SDK version."
 mkdir -p "$OUTPUT_DIR"
-temporary_dir="$(mktemp -d "${TMPDIR:-/tmp}/board-binho.XXXXXX")"
+temporary_dir="$(mktemp -d "$OUTPUT_DIR/.board-binho.XXXXXX")"
 temporary_zip="$temporary_dir/BoardBinho.webapp.zip"
 trap 'rm -rf "$temporary_dir"' EXIT
 
@@ -152,13 +154,14 @@ log "Packing Board web app."
         --name "$GAME_NAME" \
         --sdk-version "$sdk_version" \
         --model model.tflite \
+        --icon assets/board-binho-cover.png \
         --out "$temporary_zip"
 )
 
 app_id="$(read_app_id)" || fail "web-pack did not create a valid board.config.json."
 output_webapp="$OUTPUT_DIR/$app_id.webapp.zip"
+unzip -tq "$temporary_zip" >/dev/null || fail "Packed web app failed zip validation."
 mv "$temporary_zip" "$output_webapp"
-unzip -tq "$output_webapp" >/dev/null || fail "Packed web app failed zip validation."
 rm -rf "$temporary_dir"
 trap - EXIT
 

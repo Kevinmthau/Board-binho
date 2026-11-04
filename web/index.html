@@ -3,16 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-    <title>Board Binho Web</title>
+    <title>Board Binho</title>
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
     <canvas id="game-canvas" aria-label="Board Binho playfield"></canvas>
     <div id="hud" aria-live="polite">
-      <div id="score"></div>
-      <div id="status"></div>
-      <div id="setup"></div>
-      <div id="goal-banner" aria-hidden="true">GOAL!!</div>
+      <section id="blue-seat" class="seat" aria-label="Blue team">
+        <div class="seat-heading">
+          <img class="setup-piece" src="./piece-art/4.png" alt="" />
+          <span>Blue</span>
+          <strong id="blue-value"></strong>
+        </div>
+        <p id="blue-prompt"></p>
+      </section>
+      <section id="orange-seat" class="seat" aria-label="Orange team">
+        <div class="seat-heading">
+          <img class="setup-piece" src="./piece-art/5.png" alt="" />
+          <span>Orange</span>
+          <strong id="orange-value"></strong>
+        </div>
+        <p id="orange-prompt"></p>
+      </section>
+      <div id="goal-banner" aria-hidden="true"><span>GOAL!!</span><span>GOAL!!</span></div>
     </div>
     <div id="dev-controls">
       <button id="auto-setup-button" type="button">Auto setup</button>

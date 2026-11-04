@@ -19,7 +19,8 @@ This repository is the **Board Web App** version of Board Binho.
 - Web app source: `web/`
 - Vendored SDK: `vendor/board.fun-web-sdk-1.0.0-beta.6.tgz`
 - SDK source: `/Users/kevinthau/Board Studio/board.fun-web-sdk-1.0.0-beta.6.tgz`
-- Piece model: `web/public/model.tflite`
+- Piece set: Board Sports v0.1.0, four defenders per half. Any Sports piece can defend either side.
+- Piece model: `web/public/model.tflite` (SHA-256 `4d75343e149b72f8410cad10f518c64791634ae6e6932880088a34c164026ad9`).
 - Legacy Android wrapper: `android/`
 
 ## Build and deploy loop

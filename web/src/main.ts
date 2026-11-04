@@ -1,9 +1,12 @@
 import {
   Board,
   BoardContactPhase,
+  BoardContactType,
   type BoardContact,
 } from "@board.fun/web-sdk";
 import Matter from "matter-js";
+import { subscribeToBoardFrames, type BoardFrameChanges, type FingerTrace } from "./board-input";
+import { BOARD_HEIGHT, BOARD_WIDTH, FIELD_WORLD_HEIGHT, createSportsBumper, sportsPieces, type SportsPiece } from "./sports";
 
 type Vec = {
   x: number;
@@ -13,17 +16,48 @@ type Vec = {
 type PlayerSide = "left" | "right";
 type MatchPhase = "setup" | "readyToShoot" | "ballInMotion" | "goalPause";
 
-type ContactWorldState = {
+type DefenderContact = {
   contactId: number;
-  worldPosition: Vec;
+  piece: SportsPiece;
+  position: Vec;
+  angle: number;
 };
 
-type DefenderSlot = {
+type Defender = {
   side: PlayerSide;
-  contactId: number;
+  piece: SportsPiece;
+  body: Matter.Body;
+};
+
+type LiftedDefender = Pick<Defender, "side" | "piece"> & {
+  liveId?: number;
   position: Vec;
-  body: Matter.Body | null;
-  occupied: boolean;
+  liftedAt: number;
+  fromPause: boolean;
+  canceled?: boolean;
+};
+
+type BoardRecovery = {
+  baseline: Map<number, DefenderContact>;
+  countsBeforePause: Record<PlayerSide, number>;
+  displaced: Map<number, number>;
+  pendingIds: Set<number>;
+  confirmedBeforeFocus: Set<number>;
+  renewals: Map<number, { at: number; side?: PlayerSide; replacementId?: number }>;
+  setupCandidates: Map<number, {
+    at: number; contact: DefenderContact; originals: Array<{ id: number; side?: PlayerSide }>;
+  }>;
+  incompleteAtStart: boolean;
+  occupiedSides: Set<PlayerSide>;
+  rosterSize: number;
+  fromPause: boolean;
+  continuityConfirmed: boolean;
+};
+
+type DefenderUpdates = {
+  reported: BoardFrameChanges;
+  newlyRecognized: ReadonlySet<number>;
+  handoffs: ReadonlyMap<number, DefenderContact>;
 };
 
 type SwipeSample = {
@@ -33,34 +67,22 @@ type SwipeSample = {
 
 type SwipeContactState = {
   samples: SwipeSample[];
-  lastWorldPosition: Vec;
-  lastTimestamp: number;
   peakSpeed: number;
   peakVelocity: Vec;
   lastWindowedSpeed: number;
   armedAt: number | null;
-  hasLaunched: boolean;
-};
-
-type SimulatedContact = {
-  contactId: number;
-  position: Vec;
 };
 
 type Layout = {
   cssWidth: number;
   cssHeight: number;
-  dpr: number;
   pixelScale: number;
-  viewHalfWidth: number;
-  viewHalfHeight: number;
   fieldBackgroundWidth: number;
   fieldBackgroundHeight: number;
   pitchHalfWidth: number;
   pitchHalfHeight: number;
   uniformScale: number;
   wallThickness: number;
-  defenderRadius: number;
   ballRadius: number;
   ballSwipeCaptureRadius: number;
   minSwipeTravelDistance: number;
@@ -78,15 +100,15 @@ type Layout = {
 const FIELD_WIDTH = 16;
 const FIELD_HEIGHT = 9;
 const FIELD_SCREEN_FILL = 0.94;
-const FIELD_BACKGROUND_ASPECT = 1920 / 1080;
+const FIELD_BACKGROUND_ASPECT = BOARD_WIDTH / BOARD_HEIGHT;
 const GOAL_MOUTH_TOP_PIXEL_Y = 374;
 const GOAL_MOUTH_BOTTOM_PIXEL_Y = 704;
-const FIELD_BACKGROUND_PIXEL_HEIGHT = 1080;
-const DEFENDERS_PER_SIDE = 6;
+const DEFENDERS_PER_SIDE = 4;
+const REDETECTION_WINDOW_MS = 900;
+const BOARD_RESUME_GRACE_MS = 250;
 const OFF_BOARD_GOAL_CLEARANCE = 0.22;
 const WALL_THICKNESS = 0.22;
 const GOAL_DEPTH = 0.9;
-const DEFENDER_RADIUS = 0.32;
 const BALL_RADIUS = 0.2;
 const BALL_SWIPE_CAPTURE_RADIUS = 0.55;
 const MIN_SWIPE_TRAVEL_DISTANCE = 0.05;
@@ -100,12 +122,10 @@ const SWIPE_SAMPLE_WINDOW_SECONDS = 0.06;
 const SWIPE_LATCH_TIMEOUT_SECONDS = 0.016;
 const SWIPE_PEAK_HOLD_RATIO = 0.97;
 const GOAL_PAUSE_DURATION = 1.15;
-const SCORE_DISPLAY_DURATION = 5;
 const FIXED_STEP_MS = 1000 / 60;
 const PHYSICS_SUBSTEPS = 4;
 const BOUNDARY_RESTITUTION = 0.94;
 const DEFENDER_RESTITUTION = 0.94;
-const COLLISION_SEPARATION_EPSILON = 0.001;
 const FIELD_IMAGE_URL = "assets/field_background.png";
 const GOAL_CHEER_AUDIO_URL = "assets/crowd-cheer.mp3";
 const GOAL_CHEER_VOLUME = 0.85;
@@ -120,9 +140,11 @@ const SHADOW_COLOR = "rgba(0, 0, 0, 0.2)";
 
 const canvas = getElement<HTMLCanvasElement>("game-canvas");
 const ctx = get2dContext(canvas);
-const scoreEl = getElement<HTMLElement>("score");
-const statusEl = getElement<HTMLElement>("status");
-const setupEl = getElement<HTMLElement>("setup");
+const seatHud = {
+  left: getSeatHud("blue"),
+  right: getSeatHud("orange"),
+};
+
 const autoSetupButton = getElement<HTMLButtonElement>("auto-setup-button");
 const resetButton = getElement<HTMLButtonElement>("reset-button");
 
@@ -135,6 +157,13 @@ let ballBody: Matter.Body | null = null;
 let ballInPlay = true;
 let lastFrameTimestamp = performance.now();
 let accumulatorMs = 0;
+let suspended = document.hidden;
+let windowBlurred = false;
+let nativeSurfacePaused = false;
+let surfaceCancellation: { remaining: Set<number>; startedAt: number } | null = null;
+let resumeShotAt = 0;
+let lastBoardResumeAt = -Infinity;
+let lastBoardInputAt = -Infinity;
 let phase: MatchPhase = "setup";
 let currentTurn: PlayerSide = "left";
 let lastScoringSide: PlayerSide = "left";
@@ -142,7 +171,6 @@ let leftScore = 0;
 let rightScore = 0;
 let ballStillTimer = 0;
 let goalPauseTimer = 0;
-let scoreDisplayTimer = 0;
 let didPrepareInitialKickoff = false;
 let didServeInitialKickoff = false;
 let fieldImageLoaded = false;
@@ -156,14 +184,19 @@ fieldImage.src = FIELD_IMAGE_URL;
 const goalCheerAudio = new Audio(GOAL_CHEER_AUDIO_URL);
 goalCheerAudio.preload = "auto";
 goalCheerAudio.volume = GOAL_CHEER_VOLUME;
+let cheerPausedWithMatch = false;
 
-const leftSlots: DefenderSlot[] = [];
-const rightSlots: DefenderSlot[] = [];
-const allSlots: DefenderSlot[] = [];
-const wallBodies: Matter.Body[] = [];
+const defenders = new Map<number, Defender>();
+let liftedDefenders: LiftedDefender[] = [];
 const boardSwipeContacts = new Map<number, SwipeContactState>();
-const latestBoardGlyphs = new Map<number, ContactWorldState>();
-const simulatedContacts = new Map<number, SimulatedContact>();
+let latestBoardGlyphs = new Map<number, DefenderContact>();
+let liveBoardContactIds = new Set<number>();
+let boardRecovery: BoardRecovery | null = null;
+// A provisional replacement yields its slot if the tracker confirms that the
+// incumbent contact is still present. A confirmed tracker reset has no such slot.
+const staleBoardIds = new Map<number, { replacementId?: number; side: PlayerSide; setupDeadline?: number } | null>();
+const simulatedContacts = new Map<number, DefenderContact>();
+const previewArt = new Map<number, HTMLImageElement>();
 const pointerSwipeContacts = new Map<number, SwipeContactState>();
 const pointerDefenderDrags = new Map<number, number>();
 const ballTrail: Vec[] = [];
@@ -173,8 +206,8 @@ let nextSimulatedContactId = 1000;
 document.body.classList.toggle("board-device", Board.isOnDevice);
 document.body.classList.toggle("browser-preview", !Board.isOnDevice);
 
-createSlots();
 resize();
+buildPhysicsWorld();
 wireControls();
 wirePointerFallback();
 wireBoard();
@@ -182,8 +215,93 @@ requestAnimationFrame(frame);
 
 function wireControls(): void {
   window.addEventListener("resize", resize);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) nativeSurfacePaused = false;
+    syncSuspension();
+  });
+  window.addEventListener("blur", () => {
+    windowBlurred = true;
+    syncSuspension();
+  });
+  window.addEventListener("focus", () => {
+    windowBlurred = false;
+    nativeSurfacePaused = false;
+    syncSuspension();
+  });
   autoSetupButton.addEventListener("click", autoSetupDefenders);
   resetButton.addEventListener("click", resetMatch);
+}
+
+function syncSuspension(): void {
+  setSuspended(windowBlurred || document.hidden || nativeSurfacePaused);
+}
+
+function setSuspended(value: boolean): void {
+  if (suspended === value) return;
+  suspended = value;
+  surfaceCancellation = null;
+  document.body.classList.toggle("match-suspended", value);
+  if (value) {
+    cheerPausedWithMatch = !goalCheerAudio.paused && !goalCheerAudio.ended;
+    if (cheerPausedWithMatch) goalCheerAudio.pause();
+  } else if (cheerPausedWithMatch) {
+    cheerPausedWithMatch = false;
+    playGoalCheer(false);
+  }
+  CancelActiveShot();
+  pointerDefenderDrags.clear();
+  lastFrameTimestamp = performance.now();
+  accumulatorMs = 0;
+  if (Board.isOnDevice) {
+    if (value) {
+      // New IDs can precede the native menu result. Keep that cohort only if
+      // its evidence is recent enough to belong to this interruption.
+      if (boardRecovery && !boardRecovery.fromPause && [
+        ...boardRecovery.renewals.values(), ...boardRecovery.setupCandidates.values(),
+      ].some(({ at }) => lastFrameTimestamp - at <= REDETECTION_WINDOW_MS)) {
+        boardRecovery.fromPause = true;
+        finishMenuReconciliation(lastFrameTimestamp);
+      } else {
+        boardRecovery = createBoardRecovery(true);
+      }
+      // Native cancellation of the whole surface can precede WebView blur.
+      for (const lift of liftedDefenders) {
+        if (lift.canceled && engine.timing.timestamp - lift.liftedAt <= BOARD_RESUME_GRACE_MS) lift.fromPause = true;
+      }
+    } else {
+      lastBoardResumeAt = lastFrameTimestamp;
+      if (boardRecovery?.fromPause) {
+        // Old tracker updates can continue while the WebView is blurred.
+        // A fresh cohort after focus must be able to supersede those IDs.
+        for (const id of boardRecovery.confirmedBeforeFocus) boardRecovery.pendingIds.add(id);
+        boardRecovery.continuityConfirmed = false;
+        finishMenuReconciliation(lastFrameTimestamp);
+      }
+      if (phase === "ballInMotion") resumeShotAt = lastFrameTimestamp + BOARD_RESUME_GRACE_MS;
+    }
+  }
+}
+
+function finishMenuReconciliation(now: number): void {
+  if (!boardRecovery) return;
+  const restarted = trackerRestartConfirmed(boardRecovery, now);
+  reconcileSetupCandidates(boardRecovery, latestBoardGlyphs, now, restarted);
+  if (!restarted) {
+    updateDefenders(latestBoardGlyphs, true);
+    return;
+  }
+  // The menu callback has no new sensor samples. Keep previously retired
+  // IDs suppressed and retire only the remaining unconfirmed contacts.
+  for (const id of boardRecovery.pendingIds) {
+    staleBoardIds.set(id, null);
+    latestBoardGlyphs.delete(id);
+    liveBoardContactIds.delete(id);
+  }
+  for (const id of boardRecovery.renewals.keys()) {
+    if (staleBoardIds.has(id)) staleBoardIds.set(id, null);
+  }
+  boardRecovery = null;
+  updateDefenders(latestBoardGlyphs, true);
 }
 
 function wireBoard(): void {
@@ -196,49 +314,378 @@ function wireBoard(): void {
     offerSaveOption: false,
     customButtons: [{ id: "restart", title: "Restart", icon: "circulararrow" }],
   });
-  Board.input.subscribe(handleBoardContacts);
+  subscribeToBoardFrames(handleBoardContacts);
 
-  window.setInterval(() => {
-    const result = Board.pause.pollResult();
-    if (result?.action === "custom_button" && result.customButtonId === "restart") {
+  Board.pause.onResult((result) => {
+    if (result.action === "quit" || result.action === "save_and_quit") {
+      Board.application.quit();
+      return;
+    }
+    // The menu result may be the only lifecycle signal from the WebView.
+    if (performance.now() - lastBoardResumeAt > BOARD_RESUME_GRACE_MS) setSuspended(true);
+    windowBlurred = false;
+    nativeSurfacePaused = false;
+    syncSuspension();
+    if (result.action === "custom_button" && result.customButtonId === "restart") {
       resetMatch();
     }
-  }, 500);
+  });
 }
 
-function handleBoardContacts(contacts: ReadonlyArray<BoardContact>): void {
-  latestBoardGlyphs.clear();
+function handleBoardContacts(contacts: readonly BoardContact[], reported: BoardFrameChanges): void {
+  const next = new Map<number, DefenderContact>();
   const fingerContacts: BoardContact[] = [];
-  const now = performance.now() / 1000;
-
+  const now = performance.now();
+  // A native menu can interrupt sensor frames without blurring the WebView.
+  // Gestures need consecutive samples even if a late release is explicit.
+  const frameSeconds = (now - lastBoardInputAt) / 1000;
+  if (frameSeconds > SWIPE_SAMPLE_WINDOW_SECONDS) boardSwipeContacts.clear();
+  lastBoardInputAt = now;
+  updateBoardSuspension(contacts, reported, now);
+  const previousLiveIds = liveBoardContactIds;
+  liveBoardContactIds = new Set<number>();
   for (const contact of contacts) {
-    if (contact.glyphId > 0) {
-      if (!isActiveContactPhase(contact.phase)) {
-        continue;
-      }
-
-      latestBoardGlyphs.set(contact.contactId, {
+    if (!isSwipeContactPhase(contact.phase)) continue;
+    if (isActiveContactPhase(contact.phase)) liveBoardContactIds.add(contact.contactId);
+    const piece = sportsPieces.get(contact.glyphId);
+    if (contact.type === BoardContactType.Glyph && piece && isActiveContactPhase(contact.phase)) {
+      next.set(contact.contactId, {
         contactId: contact.contactId,
-        worldPosition: screenToWorld({ x: contact.x, y: contact.y }),
+        piece,
+        position: boardContactWorldPosition(contact),
+        angle: -contact.orientation * Math.PI / 180,
       });
-    } else if (isSwipeContactPhase(contact.phase)) {
+    } else if (contact.type === BoardContactType.Finger && contact.glyphId === 0) {
       fingerContacts.push(contact);
     }
   }
 
-  handleBoardFingerShotInput(fingerContacts, now);
+  // The last defender can land or lift in the same snapshot as a flick.
+  applyBoardRoster(next, reported, previousLiveIds);
+  if (!suspended) handleBoardFingerShotInput(fingerContacts.filter((finger) => !staleBoardIds.has(finger.contactId)),
+    now / 1000, Math.min(frameSeconds, SWIPE_SAMPLE_WINDOW_SECONDS), reported);
 }
 
-function handleBoardFingerShotInput(fingers: ReadonlyArray<BoardContact>, now: number): void {
-  const activeFingerIds = fingers
-    .filter((contact) => isActiveContactPhase(contact.phase))
-    .map((contact) => contact.contactId);
+function updateBoardSuspension(contacts: readonly BoardContact[], reported: BoardFrameChanges, now: number): void {
+  const fresh = contacts.filter((contact) => isActiveContactPhase(contact.phase) && reported.has(contact.contactId));
+  if (nativeSurfacePaused) {
+    if (fresh.length) {
+      nativeSurfacePaused = false;
+      syncSuspension();
+    }
+    return;
+  }
+  if (suspended || (phase !== "ballInMotion" && phase !== "goalPause")) {
+    surfaceCancellation = null;
+    return;
+  }
+  if (surfaceCancellation && now - surfaceCancellation.startedAt > BOARD_RESUME_GRACE_MS) surfaceCancellation = null;
+  if (!surfaceCancellation) {
+    if (liveBoardContactIds.size < 2 || ![...liveBoardContactIds].some((id) => reported.get(id)?.canceled)) return;
+    surfaceCancellation = { remaining: new Set(liveBoardContactIds), startedAt: now };
+  }
+  // The host can tear down the surface over several inference frames. A
+  // stationary sample for a remaining ID is consistent with that teardown.
+  const { remaining } = surfaceCancellation;
+  if (fresh.some((contact) => contact.phase !== BoardContactPhase.Stationary ||
+      reported.get(contact.contactId)?.began || !remaining.has(contact.contactId))) {
+    surfaceCancellation = null;
+    return;
+  }
+  for (const id of remaining) {
+    const change = reported.get(id);
+    if (change?.canceled) {
+      remaining.delete(id);
+    } else if (change?.terminated) {
+      surfaceCancellation = null;
+      return;
+    }
+  }
+  if (!remaining.size) {
+    nativeSurfacePaused = true;
+    syncSuspension();
+  }
+}
 
-  if (phase === "setup" || phase === "goalPause") {
-    pruneSwipeContactState(boardSwipeContacts, activeFingerIds);
+function applyBoardRoster(next: Map<number, DefenderContact>, reported: BoardFrameChanges, previousLiveIds = liveBoardContactIds): void {
+  const handoffs = new Map<number, DefenderContact>();
+  const trackerRestarted = reconcileBoardRoster(next, reported, previousLiveIds, handoffs);
+  for (const id of staleBoardIds.keys()) liveBoardContactIds.delete(id);
+  const newlyRecognized = new Set<number>();
+  for (const id of next.keys()) {
+    if (!latestBoardGlyphs.has(id) || reported.get(id)?.began) newlyRecognized.add(id);
+  }
+  // A waiting extra piece cannot take an incumbent's slot during an ID handoff.
+  const priority = new Map<number, DefenderContact>();
+  for (const contact of handoffs.values()) priority.set(contact.contactId, contact);
+  latestBoardGlyphs = priority.size ? new Map([...priority, ...next]) : next;
+  updateDefenders(latestBoardGlyphs, suspended || performance.now() < resumeShotAt || trackerRestarted,
+    { reported, newlyRecognized, handoffs });
+}
+
+function createBoardRecovery(fromPause: boolean, liveIds = liveBoardContactIds): BoardRecovery {
+  return {
+    baseline: new Map(latestBoardGlyphs), countsBeforePause: { left: countDefenders("left"), right: countDefenders("right") },
+    displaced: new Map(),
+    pendingIds: new Set(liveIds), confirmedBeforeFocus: new Set(), renewals: new Map(),
+    setupCandidates: new Map(), incompleteAtStart: !didServeInitialKickoff && defenders.size < 2 * DEFENDERS_PER_SIDE,
+    occupiedSides: new Set([...defenders.values()].map((defender) => defender.side)),
+    rosterSize: latestBoardGlyphs.size, fromPause, continuityConfirmed: false,
+  };
+}
+
+function trackerRestartConfirmed(recovery: BoardRecovery, now: number): boolean {
+  if (!recovery.fromPause || recovery.continuityConfirmed) return false;
+  // A recycled number and a physical pose can both identify the same arrival.
+  // Give the pose match priority and count that arrival only once.
+  const byArrival = new Map<number, [number, { at: number; side?: PlayerSide; replacementId?: number }]>();
+  for (const [oldId, renewal] of recovery.renewals) {
+    if (now - renewal.at > REDETECTION_WINDOW_MS) continue;
+    const id = renewal.replacementId ?? oldId;
+    if (!byArrival.has(id) || id !== oldId) byArrival.set(id, [oldId, renewal]);
+  }
+  const recent = new Map(byArrival.values());
+  // Indistinguishable copies can corroborate the size of a returning cohort
+  // without assigning an individual collider on the strength of a glyph.
+  for (const [id, candidate] of recovery.setupCandidates) {
+    if (byArrival.has(id) || now - candidate.at > REDETECTION_WINDOW_MS) continue;
+    const side = candidate.contact.position.x < 0 ? "left" : "right";
+    const onHalf = candidate.originals.filter((old) => old.side === side);
+    const sources = onHalf.length ? onHalf : candidate.originals;
+    const available = sources.find((old) => !recent.has(old.id));
+    if (available) recent.set(available.id, { at: candidate.at, side: available.side, replacementId: id });
+  }
+  // A run of changes confined to one team cannot invalidate an untouched opponent.
+  return recent.size >= Math.max(2, Math.ceil(recovery.rosterSize / 2)) &&
+    [...recovery.occupiedSides].every((side) => [...recent.values()].some((renewal) => renewal.side === side));
+}
+
+function reconcileSetupCandidates(recovery: BoardRecovery, next: Map<number, DefenderContact>, now: number, restarted: boolean): void {
+  if (!recovery.fromPause || didServeInitialKickoff) return;
+  for (const [id, candidate] of recovery.setupCandidates) {
+    if (!liveBoardContactIds.has(id) || staleBoardIds.has(id)) continue;
+    const unresolved = candidate.originals.some((old) => next.has(old.id) && recovery.pendingIds.has(old.id));
+    if (!restarted && !recovery.continuityConfirmed && unresolved && now - candidate.at < REDETECTION_WINDOW_MS) {
+      next.delete(id);
+    } else {
+      next.set(id, candidate.contact);
+    }
+  }
+}
+
+function reconcileBoardRoster(
+  next: Map<number, DefenderContact>, reported: BoardFrameChanges, previousLiveIds: Set<number>,
+  handoffs: Map<number, DefenderContact>,
+): boolean {
+  const now = performance.now();
+  // Beta.6 retains old tracker IDs as Stationary. A real sample makes an ID
+  // authoritative again, even when the native sample is itself Stationary.
+  for (const [id, substitute] of staleBoardIds) {
+    const contact = next.get(id);
+    const change = reported.get(id);
+    const setupSettled = substitute?.setupDeadline !== undefined && now >= substitute.setupDeadline &&
+      countDefenders(substitute.side) < DEFENDERS_PER_SIDE;
+    if (!setupSettled && liveBoardContactIds.has(id) && (!change || (substitute && !contact && !change.began && !change.terminated))) {
+      if (substitute?.replacementId !== undefined) {
+        const replacementChange = reported.get(substitute.replacementId);
+        if (replacementChange?.terminated || replacementChange?.began) substitute.replacementId = undefined;
+      }
+      next.delete(id);
+      continue;
+    }
+    staleBoardIds.delete(id);
+    if (contact && substitute && change && !change.began && !change.terminated &&
+        placementSide(contact.position, contact.piece, contact.angle) === substitute.side) {
+      if (boardRecovery) boardRecovery.continuityConfirmed = true;
+      const replacementId = substitute.replacementId;
+      const slot = replacementId !== undefined ? defenders.get(replacementId) : undefined;
+      if (replacementId !== undefined && slot?.side === substitute.side) {
+        defenders.delete(replacementId);
+        defenders.set(id, slot);
+      } else if (phase === "ballInMotion") {
+        liftedDefenders.push({
+          liveId: id, side: substitute.side, piece: contact.piece, position: contact.position,
+          liftedAt: engine.timing.timestamp, fromPause: true,
+        });
+      }
+    }
+  }
+  const knownCandidates = boardRecovery?.setupCandidates;
+  const arrivals = [...next.values()].filter(({ contactId }) =>
+    (!knownCandidates?.has(contactId) || reported.get(contactId)?.began) &&
+    (reported.get(contactId)?.began || (reported.has(contactId) && !latestBoardGlyphs.has(contactId))),
+  );
+  if (boardRecovery) {
+    for (const [id, candidate] of boardRecovery.setupCandidates) {
+      const contact = next.get(id);
+      if (!contact || reported.get(id)?.began || now - candidate.at >= REDETECTION_WINDOW_MS) boardRecovery.setupCandidates.delete(id);
+      else candidate.contact = contact;
+    }
+    for (const [id, { at }] of boardRecovery.renewals) {
+      if (now - at > REDETECTION_WINDOW_MS || reported.get(id)?.terminated) boardRecovery.renewals.delete(id);
+    }
+    if (!boardRecovery.fromPause && !boardRecovery.renewals.size && !boardRecovery.setupCandidates.size) boardRecovery = null;
+  }
+  if (!boardRecovery && (!arrivals.length || !latestBoardGlyphs.size)) return false;
+  // The first replacement IDs can arrive before any WebView lifecycle signal.
+  const recovery = boardRecovery ?? createBoardRecovery(false, previousLiveIds);
+  const { pendingIds } = recovery;
+  for (const id of recovery.confirmedBeforeFocus) {
+    const change = reported.get(id);
+    if (change?.began || change?.terminated || !liveBoardContactIds.has(id) || staleBoardIds.has(id)) recovery.confirmedBeforeFocus.delete(id);
+  }
+  for (const id of pendingIds) {
+    const change = reported.get(id);
+    if (suspended && recovery.fromPause && change && !change.began && !change.terminated) recovery.confirmedBeforeFocus.add(id);
+    // An ordinary update or a clean end for an incumbent establishes that
+    // the old tracker is still reporting. Extra copies keep their own IDs.
+    if (latestBoardGlyphs.has(id) && change && !change.canceled && (!change.began || change.terminated)) recovery.continuityConfirmed = true;
+  }
+  const cached = [...latestBoardGlyphs.values()].filter((old) => next.has(old.contactId) && !reported.has(old.contactId));
+  const matchedArrivals = new Set<number>();
+  const renewed = new Map<number, number>();
+  for (const arrival of arrivals) {
+    // An explicit lift ends ownership even when the same packet reuses the ID.
+    const incumbent = reported.get(arrival.contactId)?.terminated ? undefined : latestBoardGlyphs.get(arrival.contactId);
+    const sameBase = incumbent && distance(incumbent.position, arrival.position) < incumbent.piece.radius * 0.5;
+    if (pendingIds.has(arrival.contactId) && incumbent) {
+      renewed.set(arrival.contactId, arrival.contactId);
+      const original = recovery.baseline.get(arrival.contactId);
+      if (!sameBase && original && original.piece !== arrival.piece) recovery.displaced.set(arrival.contactId, now);
+    }
+    // A recycled ID at its own physical base already has a positional match.
+    // A transient change of classification cannot borrow a second slot.
+    if (sameBase) {
+      matchedArrivals.add(arrival.contactId);
+      if (defenders.has(arrival.contactId)) handoffs.set(arrival.contactId, arrival);
+      continue;
+    }
+    // The same base can be assigned a new ID more than once in a cohort.
+    // Match against the current live poses, independently of the pause baseline.
+    for (const old of cached) {
+      if (!next.has(old.contactId) || distance(old.position, arrival.position) >= old.piece.radius * 0.5) continue;
+      next.delete(old.contactId);
+      staleBoardIds.set(old.contactId, null);
+      matchedArrivals.add(arrival.contactId);
+      if (pendingIds.has(old.contactId)) renewed.set(old.contactId, arrival.contactId);
+      if (defenders.has(old.contactId)) handoffs.set(old.contactId, arrival);
+    }
+    // Without a positional handoff, a returning ID of the same type keeps
+    // its own slot. Another stationary copy cannot supply a second match.
+    if (!matchedArrivals.has(arrival.contactId) && incumbent?.piece === arrival.piece) {
+      matchedArrivals.add(arrival.contactId);
+      if (recovery.fromPause && pendingIds.has(arrival.contactId) && defenders.has(arrival.contactId)) {
+        handoffs.set(arrival.contactId, arrival);
+      }
+    }
+  }
+  // Isolated handoffs replace only their own contacts. Retire unrelated
+  // cached poses only when a pause and a group of concurrent renewals agree.
+  for (const [id, replacementId] of renewed) recovery.renewals.set(id, { at: now, side: defenders.get(id)?.side, replacementId });
+  // The old glyph at a reused ID has gone from the SDK snapshot, but the
+  // physical piece can return on a different ID in the next packet.
+  for (const [id, displacedAt] of recovery.displaced) {
+    const original = recovery.baseline.get(id);
+    if (!original || now - displacedAt > REDETECTION_WINDOW_MS) {
+      recovery.displaced.delete(id);
+      continue;
+    }
+    const returns = arrivals.filter((arrival) => !matchedArrivals.has(arrival.contactId) &&
+      arrival.contactId !== id && arrival.piece === original.piece);
+    if (returns.length !== 1) continue;
+    recovery.renewals.set(id, { at: now, side: original.position.x < 0 ? "left" : "right", replacementId: returns[0].contactId });
+    matchedArrivals.add(returns[0].contactId);
+    recovery.displaced.delete(id);
+  }
+  const relocations = new Map<number, DefenderContact>();
+  if (!recovery.continuityConfirmed) {
+    const nearPause = recovery.fromPause && (suspended || now - lastBoardResumeAt <= BOARD_RESUME_GRACE_MS);
+    const incompleteSetup = !didServeInitialKickoff && (recovery.incompleteAtStart || defenders.size < 2 * DEFENDERS_PER_SIDE);
+    // All recognized pieces can identify a new tracker, including a base
+    // on a rail or straddling midfield. Only legal placements own slots.
+    const retained = cached.filter((old) => pendingIds.has(old.contactId) && next.has(old.contactId));
+    for (const old of retained) {
+      if (renewed.has(old.contactId)) continue;
+      const side = defenders.get(old.contactId)?.side;
+      const matches = arrivals.filter((arrival) => !matchedArrivals.has(arrival.contactId) && arrival.piece === old.piece);
+      const otherCopies = retained.filter((other) => other !== old && other.piece === old.piece);
+      let match: DefenderContact | undefined;
+      if (!otherCopies.length && matches.length === 1) {
+        match = matches[0];
+      } else if (side && !otherCopies.some((other) => defenders.get(other.contactId)?.side === side)) {
+        const onHalf = matches.filter((arrival) => placementSide(arrival.position, arrival.piece, arrival.angle) === side);
+        if (onHalf.length === 1) match = onHalf[0];
+      }
+      if (!match) continue;
+      recovery.renewals.set(old.contactId, { at: now, side, replacementId: match.contactId });
+      matchedArrivals.add(match.contactId);
+      relocations.set(old.contactId, match);
+      if (incompleteSetup) {
+        recovery.setupCandidates.set(match.contactId, { at: now, contact: match, originals: [{ id: old.contactId, side }] });
+      }
+      const setupHandoff = recovery.fromPause && incompleteSetup;
+      const pausedHandoff = nearPause && !recovery.confirmedBeforeFocus.has(old.contactId) &&
+        placementSide(match.position, match.piece, match.angle) === side;
+      if (side && (setupHandoff || pausedHandoff)) {
+        // During an incomplete setup, count a possible handoff once while
+        // the cohort arrives. Without corroboration, both distinct IDs stand.
+        staleBoardIds.set(old.contactId, {
+          replacementId: match.contactId, side, setupDeadline: !didServeInitialKickoff ? now + REDETECTION_WINDOW_MS : undefined,
+        });
+        next.delete(old.contactId);
+        handoffs.set(old.contactId, match);
+      }
+    }
+    if (incompleteSetup) {
+      for (const arrival of arrivals) {
+        if (matchedArrivals.has(arrival.contactId)) continue;
+        const originals = retained.filter((old) => old.piece === arrival.piece && !renewed.has(old.contactId))
+          .map((old) => ({ id: old.contactId, side: defenders.get(old.contactId)?.side }));
+        if (originals.length) recovery.setupCandidates.set(arrival.contactId, { at: now, contact: arrival, originals });
+      }
+    }
+  }
+  const restarted = trackerRestartConfirmed(recovery, now);
+  if (restarted) {
+    for (const id of recovery.renewals.keys()) {
+      if (staleBoardIds.has(id)) staleBoardIds.set(id, null);
+    }
+    for (const [oldId, match] of relocations) {
+      if (defenders.has(oldId)) handoffs.set(oldId, match);
+    }
+  }
+  for (const id of pendingIds) {
+    if (restarted && !reported.has(id) && liveBoardContactIds.has(id)) {
+      // The SDK also caches fingers and unclassified hands across a tracker restart.
+      staleBoardIds.set(id, null);
+      next.delete(id);
+    }
+    if (reported.has(id) || !liveBoardContactIds.has(id) || staleBoardIds.get(id) === null) pendingIds.delete(id);
+  }
+  reconcileSetupCandidates(recovery, next, now, restarted);
+  if (!pendingIds.size && !(suspended && recovery.fromPause && recovery.confirmedBeforeFocus.size && !restarted)) boardRecovery = null;
+  else if (recovery.renewals.size || recovery.setupCandidates.size) boardRecovery = recovery;
+  return restarted;
+}
+
+function handleBoardFingerShotInput(
+  fingers: readonly BoardContact[], now: number, frameSeconds: number, reported: BoardFrameChanges,
+): void {
+  if (phase !== "readyToShoot") {
+    boardSwipeContacts.clear();
     return;
   }
 
+  const replayed = new Set<number>();
+  for (const [id, change] of reported) {
+    for (const trace of change.fingerTraces ?? []) {
+      // A single live pose is already available in the SDK snapshot below.
+      if (!trace.terminal && trace.points.length <= 1) continue;
+      replayFingerTrace(id, trace, now, frameSeconds);
+      if (!trace.terminal) replayed.add(id);
+      if (phase !== "readyToShoot") return;
+    }
+  }
   const seenFingerIds = new Set<number>();
 
   for (const contact of fingers) {
@@ -248,33 +695,74 @@ function handleBoardFingerShotInput(fingers: ReadonlyArray<BoardContact>, now: n
     }
 
     if (contact.phase === BoardContactPhase.Ended) {
-      const worldPosition = screenToWorld({ x: contact.x, y: contact.y });
+      const worldPosition = boardContactWorldPosition(contact);
       finishSwipeContact(boardSwipeContacts, contact.contactId, worldPosition, now);
       continue;
     }
 
     seenFingerIds.add(contact.contactId);
-    const worldPosition = screenToWorld({ x: contact.x, y: contact.y });
+    if (replayed.has(contact.contactId)) continue;
+    const worldPosition = boardContactWorldPosition(contact);
     const existing = boardSwipeContacts.get(contact.contactId);
 
-    if (!existing || contact.phase === BoardContactPhase.Began) {
-      boardSwipeContacts.set(contact.contactId, createSwipeContactState(worldPosition, now));
+    const traces = reported.get(contact.contactId)?.fingerTraces;
+    if (!existing || contact.phase === BoardContactPhase.Began || traces?.[traces.length - 1]?.began) {
+      if (contact.phase !== BoardContactPhase.Stationary || reported.has(contact.contactId)) {
+        boardSwipeContacts.set(contact.contactId, createSwipeContactState(worldPosition, now));
+      }
       continue;
     }
 
-    updateSwipeState(boardSwipeContacts, contact.contactId, existing, worldPosition, now);
+    updateSwipeState(existing, worldPosition, now);
   }
 
-  // Absence from the SDK snapshot does not distinguish Ended from Canceled.
-  // Only an explicit Ended phase may complete an armed swipe.
-  pruneSwipeContactState(boardSwipeContacts, Array.from(seenFingerIds));
+  for (const id of boardSwipeContacts.keys()) if (!seenFingerIds.has(id)) boardSwipeContacts.delete(id);
+}
+
+function replayFingerTrace(id: number, trace: FingerTrace, now: number, frameSeconds: number): void {
+  if (trace.began || trace.terminal === BoardContactPhase.Canceled) boardSwipeContacts.delete(id);
+  if (trace.terminal === BoardContactPhase.Canceled) return;
+
+  let swipe = boardSwipeContacts.get(id);
+  const release = trace.releasePosition;
+  const onBoard = release && release.x >= 0 && release.x <= BOARD_WIDTH && release.y >= 0 && release.y <= BOARD_HEIGHT;
+  const last = trace.points[trace.points.length - 1];
+  const hasFinalMove = onBoard && (release.x !== last?.x || release.y !== last?.y);
+  const points = hasFinalMove ? [...trace.points, release] : trace.points;
+  // The host supplies no individual timestamps for poses in one packet.
+  const samples = points.map((point, index) => ({
+    position: boardContactWorldPosition(point),
+    timestamp: now - frameSeconds * (points.length - 1 - index) / Math.max(1, points.length - 1),
+  }));
+  if (!swipe) {
+    const first = samples.shift();
+    if (!first) return;
+    swipe = createSwipeContactState(first.position, first.timestamp);
+    boardSwipeContacts.set(id, swipe);
+  }
+  if (trace.terminal === BoardContactPhase.Ended) {
+    finishSwipeSamples(swipe, samples, now);
+    boardSwipeContacts.delete(id);
+    return;
+  }
+  for (const sample of samples) {
+    updateSwipeState(swipe, sample.position, sample.timestamp);
+    if (phase !== "readyToShoot") return;
+  }
 }
 
 function wirePointerFallback(): void {
+  if (Board.isOnDevice) return;
+
+  for (const piece of sportsPieces.values()) {
+    const image = new Image();
+    image.src = `piece-art/${piece.glyphId}.png`;
+    previewArt.set(piece.glyphId, image);
+  }
   canvas.addEventListener("pointerdown", (event) => {
     const worldPosition = pointerWorldPosition(event);
 
-    if (!Board.isOnDevice && CanLaunchSwipe() && distance(worldPosition, getBallPosition()) <= layout.ballSwipeCaptureRadius) {
+    if (CanLaunchSwipe() && distance(worldPosition, getBallPosition()) <= layout.ballSwipeCaptureRadius) {
       canvas.setPointerCapture(event.pointerId);
       pointerSwipeContacts.set(
         event.pointerId,
@@ -284,13 +772,11 @@ function wirePointerFallback(): void {
       return;
     }
 
-    if (!Board.isOnDevice && canPlaceBrowserDefender(worldPosition)) {
-      const contactId = beginBrowserDefenderDrag(worldPosition);
-      if (contactId >= 0) {
-        canvas.setPointerCapture(event.pointerId);
-        pointerDefenderDrags.set(event.pointerId, contactId);
-        event.preventDefault();
-      }
+    const contact = beginBrowserDefenderDrag(worldPosition);
+    if (contact) {
+      canvas.setPointerCapture(event.pointerId);
+      pointerDefenderDrags.set(event.pointerId, contact.contactId);
+      event.preventDefault();
     }
   });
 
@@ -309,8 +795,6 @@ function wirePointerFallback(): void {
     }
 
     updateSwipeState(
-      pointerSwipeContacts,
-      event.pointerId,
       swipe,
       worldPosition,
       performance.now() / 1000,
@@ -335,31 +819,21 @@ function wirePointerFallback(): void {
 
   canvas.addEventListener("pointerup", finishPointer);
   canvas.addEventListener("pointercancel", finishPointer);
+  canvas.addEventListener("lostpointercapture", finishPointer);
 }
 
 function updateSwipeState(
-  contacts: Map<number, SwipeContactState>,
-  contactId: number,
   swipeContact: SwipeContactState,
   worldPosition: Vec,
   now: number,
 ): void {
-  const readyToLaunch = !swipeContact.hasLaunched && CanLaunchSwipe();
-
-  if (readyToLaunch) {
-    recordSwipeSample(swipeContact, worldPosition, now);
-  } else {
+  if (!CanLaunchSwipe()) {
     resetSwipeSampler(swipeContact, worldPosition, now);
+    return;
   }
-
-  swipeContact.lastWorldPosition = worldPosition;
-  swipeContact.lastTimestamp = now;
-
-  if (readyToLaunch && TryLaunchSwipe(swipeContact, now)) {
-    swipeContact.hasLaunched = true;
-  }
-
-  contacts.set(contactId, swipeContact);
+  recordSwipeSample(swipeContact, worldPosition, now);
+  const velocity = qualifyingSwipeVelocity(swipeContact, now);
+  if (velocity) launchSwipeVelocity(velocity);
 }
 
 function finishSwipeContact(
@@ -373,31 +847,29 @@ function finishSwipeContact(
     return;
   }
 
-  const readyToLaunch = !swipeContact.hasLaunched && CanLaunchSwipe();
-
-  if (readyToLaunch && swipeContact.armedAt === null) {
-    recordSwipeSample(swipeContact, worldPosition, now);
-    swipeContact.lastWorldPosition = worldPosition;
-    swipeContact.lastTimestamp = now;
-  }
-
-  if (readyToLaunch && TryLaunchSwipe(swipeContact, now, true)) {
-    swipeContact.hasLaunched = true;
-  }
-
+  finishSwipeSamples(swipeContact, [{ position: worldPosition, timestamp: now }], now);
   contacts.delete(contactId);
+}
+
+function finishSwipeSamples(swipe: SwipeContactState, samples: readonly SwipeSample[], now: number): void {
+  // A faster release can improve the shot. A final jitter sample can also age
+  // the qualifying motion out of the sampling window, so retain the best one.
+  let best = swipe.armedAt === null ? null : qualifyingSwipeVelocity(swipe, now, true);
+  for (const sample of samples) {
+    recordSwipeSample(swipe, sample.position, sample.timestamp);
+    const velocity = qualifyingSwipeVelocity(swipe, sample.timestamp, true);
+    if (velocity && (!best || dot(velocity, velocity) > dot(best, best))) best = velocity;
+  }
+  if (best) launchSwipeVelocity(best);
 }
 
 function createSwipeContactState(worldPosition: Vec, now: number): SwipeContactState {
   return {
     samples: [{ position: worldPosition, timestamp: now }],
-    lastWorldPosition: worldPosition,
-    lastTimestamp: now,
     peakSpeed: 0,
     peakVelocity: { x: 0, y: 0 },
     lastWindowedSpeed: 0,
     armedAt: null,
-    hasLaunched: false,
   };
 }
 
@@ -430,13 +902,17 @@ function resetSwipePeak(state: SwipeContactState): void {
 }
 
 function frame(timestamp: number): void {
-  const deltaMs = Math.min(timestamp - lastFrameTimestamp, 100);
+  if (suspended || timestamp < resumeShotAt) {
+    lastFrameTimestamp = timestamp;
+    if (!suspended) render();
+    requestAnimationFrame(frame);
+    return;
+  }
+  const deltaMs = clamp(timestamp - Math.max(lastFrameTimestamp, resumeShotAt), 0, 100);
   lastFrameTimestamp = timestamp;
   accumulatorMs += deltaMs;
 
   updateTimers(deltaMs / 1000);
-  UpdateDefenderPlacements();
-  UpdateMatchPhaseFromPlacements();
 
   while (accumulatorMs >= FIXED_STEP_MS) {
     fixedStep(FIXED_STEP_MS / 1000);
@@ -448,10 +924,6 @@ function frame(timestamp: number): void {
 }
 
 function updateTimers(deltaSeconds: number): void {
-  if (scoreDisplayTimer > 0) {
-    scoreDisplayTimer = Math.max(0, scoreDisplayTimer - deltaSeconds);
-  }
-
   if (phase !== "goalPause") {
     return;
   }
@@ -461,7 +933,8 @@ function updateTimers(deltaSeconds: number): void {
     goalPauseTimer = 0;
     ResetBallToCenter();
     currentTurn = lastScoringSide === "left" ? "right" : "left";
-    phase = CanPlayWithCurrentDefenders() ? "readyToShoot" : "setup";
+    phase = "readyToShoot";
+    updateDefenders(Board.isOnDevice ? latestBoardGlyphs : simulatedContacts);
   }
 }
 
@@ -503,24 +976,18 @@ function resize(): void {
   canvas.style.height = `${cssHeight}px`;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  layout = createLayout(cssWidth, cssHeight, dpr);
-  rebuildPhysicsWorld();
+  layout = createLayout(cssWidth, cssHeight);
+  // A pointer sampled before a viewport change is in the old screen space.
+  CancelActiveShot();
+  pointerDefenderDrags.clear();
 }
 
 function createLayout(
   cssWidth = Math.max(1, window.innerWidth),
   cssHeight = Math.max(1, window.innerHeight),
-  dpr = Math.max(1, window.devicePixelRatio || 1),
 ): Layout {
-  const viewHalfHeight = 5.5;
-  const viewHalfWidth = viewHalfHeight * (cssWidth / cssHeight);
-  const screenWidth = viewHalfWidth * 2;
-  const screenHeight = viewHalfHeight * 2;
-  const screenAspect = screenWidth / screenHeight;
-  const fieldBackgroundSize =
-    screenAspect > FIELD_BACKGROUND_ASPECT
-      ? { x: screenHeight * FIELD_BACKGROUND_ASPECT, y: screenHeight }
-      : { x: screenWidth, y: screenWidth / FIELD_BACKGROUND_ASPECT };
+  // Physics stays in the Board's 16:9 world. Only the projection resizes.
+  const fieldBackgroundSize = { x: FIELD_WORLD_HEIGHT * FIELD_BACKGROUND_ASPECT, y: FIELD_WORLD_HEIGHT };
   const fieldBackgroundHalfWidth = fieldBackgroundSize.x * 0.5;
   const fieldBackgroundHalfHeight = fieldBackgroundSize.y * 0.5;
   const goalDisplayHalfWidth =
@@ -528,33 +995,29 @@ function createLayout(
   const uniformScale =
     Math.min(fieldBackgroundHalfWidth / goalDisplayHalfWidth, fieldBackgroundHalfHeight / (FIELD_HEIGHT * 0.5)) *
     FIELD_SCREEN_FILL;
-  const pixelScale = Math.min(cssWidth / screenWidth, cssHeight / screenHeight);
+  const pixelScale = Math.min(cssWidth / fieldBackgroundSize.x, cssHeight / fieldBackgroundSize.y);
   const scale = (value: number): number => value * uniformScale;
   const goalMouthTopY = lerp(
     fieldBackgroundHalfHeight,
     -fieldBackgroundHalfHeight,
-    GOAL_MOUTH_TOP_PIXEL_Y / FIELD_BACKGROUND_PIXEL_HEIGHT,
+    GOAL_MOUTH_TOP_PIXEL_Y / BOARD_HEIGHT,
   );
   const goalMouthBottomY = lerp(
     fieldBackgroundHalfHeight,
     -fieldBackgroundHalfHeight,
-    GOAL_MOUTH_BOTTOM_PIXEL_Y / FIELD_BACKGROUND_PIXEL_HEIGHT,
+    GOAL_MOUTH_BOTTOM_PIXEL_Y / BOARD_HEIGHT,
   );
 
   return {
     cssWidth,
     cssHeight,
-    dpr,
     pixelScale,
-    viewHalfWidth,
-    viewHalfHeight,
     fieldBackgroundWidth: fieldBackgroundSize.x,
     fieldBackgroundHeight: fieldBackgroundSize.y,
     pitchHalfWidth: fieldBackgroundHalfWidth,
     pitchHalfHeight: fieldBackgroundHalfHeight,
     uniformScale,
     wallThickness: scale(WALL_THICKNESS),
-    defenderRadius: scale(DEFENDER_RADIUS),
     ballRadius: scale(BALL_RADIUS),
     ballSwipeCaptureRadius: scale(BALL_SWIPE_CAPTURE_RADIUS),
     minSwipeTravelDistance: scale(MIN_SWIPE_TRAVEL_DISTANCE),
@@ -570,11 +1033,7 @@ function createLayout(
   };
 }
 
-function rebuildPhysicsWorld(): void {
-  Matter.Composite.clear(engine.world, false);
-  wallBodies.length = 0;
-  ballBody = null;
-
+function buildPhysicsWorld(): void {
   buildWalls();
   ballBody = Matter.Bodies.circle(0, 0, layout.ballRadius, {
     label: "ball",
@@ -583,15 +1042,9 @@ function rebuildPhysicsWorld(): void {
     frictionStatic: 0,
     frictionAir: 0.018,
     density: 0.002,
+    slop: 0.001,
   });
   Matter.Composite.add(engine.world, ballBody);
-
-  for (const slot of allSlots) {
-    slot.body = null;
-    syncSlotBody(slot);
-  }
-
-  ResetBallToCenter();
 }
 
 function buildWalls(): void {
@@ -644,135 +1097,116 @@ function addWall(position: Vec, size: Vec): void {
     friction: 0.05,
     frictionStatic: 0,
   });
-  wallBodies.push(wall);
   Matter.Composite.add(engine.world, wall);
 }
 
-function createSlots(): void {
-  for (let i = 0; i < DEFENDERS_PER_SIDE; i += 1) {
-    leftSlots.push(createSlot("left"));
-    rightSlots.push(createSlot("right"));
+// Range of sensor positions that keep the rotated base entirely on this half.
+function placementBounds(piece: SportsPiece, angle: number, side: PlayerSide): Matter.Bounds {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const min = { x: Infinity, y: Infinity };
+  const max = { x: -Infinity, y: -Infinity };
+  for (const vertex of piece.vertices) {
+    const x = vertex.x * cos - vertex.y * sin;
+    const y = vertex.x * sin + vertex.y * cos;
+    min.x = Math.min(min.x, x);
+    min.y = Math.min(min.y, y);
+    max.x = Math.max(max.x, x);
+    max.y = Math.max(max.y, y);
   }
-}
-
-function createSlot(side: PlayerSide): DefenderSlot {
-  const slot: DefenderSlot = {
-    side,
-    contactId: -1,
-    position: { x: 0, y: 0 },
-    body: null,
-    occupied: false,
+  return {
+    min: { x: (side === "left" ? -layout.pitchHalfWidth : 0) - min.x, y: -layout.pitchHalfHeight - min.y },
+    max: { x: (side === "left" ? 0 : layout.pitchHalfWidth) - max.x, y: layout.pitchHalfHeight - max.y },
   };
-  allSlots.push(slot);
-  return slot;
 }
 
-function UpdateDefenderPlacements(): void {
-  const activeGlyphs = getActiveGlyphContacts();
-
-  if (phase === "ballInMotion") {
-    updateDefenderRemovalsDuringBallInMotion(activeGlyphs);
-    return;
+function placementSide(position: Vec, piece: SportsPiece, angle: number): PlayerSide | null {
+  const side = position.x < 0 ? "left" : "right";
+  if (!Matter.Bounds.contains(placementBounds(piece, angle, side), position)) return null;
+  if (Math.hypot(position.x, position.y) < piece.radius + layout.ballRadius) {
+    const kickoff = Matter.Vector.rotate({ x: -position.x, y: -position.y }, -angle);
+    const overlapsBall = piece.vertices.some((vertex, i, vertices) =>
+      distanceFromPointToSegment(kickoff, vertex, vertices[(i + 1) % vertices.length]) < layout.ballRadius,
+    );
+    if (overlapsBall) return null;
   }
-
-  for (const slot of allSlots) {
-    slot.contactId = -1;
-  }
-
-  AssignSlots(leftSlots, activeGlyphs, "left");
-  AssignSlots(rightSlots, activeGlyphs, "right");
-
-  for (const slot of allSlots) {
-    setSlotOccupied(slot, slot.contactId >= 0);
-  }
+  return side;
 }
 
-function getActiveGlyphContacts(): ContactWorldState[] {
-  const contacts = Board.isOnDevice
-    ? Array.from(latestBoardGlyphs.values())
-    : Array.from(simulatedContacts.values()).map((contact) => ({
-        contactId: contact.contactId,
-        worldPosition: contact.position,
-      }));
-
-  return contacts
-    .filter((contact) => IsContactOnSide(contact.worldPosition, "left") || IsContactOnSide(contact.worldPosition, "right"))
-    .sort((left, right) => left.contactId - right.contactId);
+function countDefenders(side: PlayerSide): number {
+  let count = 0;
+  for (const defender of defenders.values()) {
+    if (defender.side === side) count += 1;
+  }
+  return count;
 }
 
-function updateDefenderRemovalsDuringBallInMotion(activeGlyphs: ContactWorldState[]): void {
-  const activeContactIds = new Set(activeGlyphs.map((contact) => contact.contactId));
-  for (const slot of allSlots) {
-    if (slot.contactId < 0 || activeContactIds.has(slot.contactId)) {
-      continue;
+function updateDefenders(
+  contacts: ReadonlyMap<number, DefenderContact>, fromPause = false,
+  updates?: DefenderUpdates,
+): void {
+  // The physics clock stops while the menu is open.
+  const now = engine.timing.timestamp;
+  const liveIds = Board.isOnDevice ? liveBoardContactIds : contacts;
+  for (const lift of liftedDefenders) {
+    if (lift.liveId !== undefined && (!liveIds.has(lift.liveId) || updates?.reported.get(lift.liveId)?.began)) {
+      lift.liveId = undefined;
+      lift.liftedAt = now;
     }
-
-    slot.contactId = -1;
-    setSlotOccupied(slot, false);
   }
-}
-
-function AssignSlots(slots: DefenderSlot[], contacts: ContactWorldState[], side: PlayerSide): void {
-  let slotIndex = 0;
-  for (const contact of contacts) {
-    if (slotIndex >= slots.length) {
-      return;
+  liftedDefenders = phase === "ballInMotion"
+    ? liftedDefenders.filter((lift) => lift.liveId !== undefined || now - lift.liftedAt < REDETECTION_WINDOW_MS)
+    : [];
+  // Keep existing slots when extra pieces arrive. Copies share a glyph but
+  // every contact owns its own collider until it leaves its half.
+  for (const [id, defender] of defenders) {
+    const contact = contacts.get(id);
+    const change = updates?.reported.get(id);
+    const newLifetime = change?.began;
+    if (!contact || newLifetime || placementSide(contact.position, contact.piece, contact.angle) !== defender.side) {
+      if (phase === "ballInMotion") {
+        liftedDefenders.push({
+          liveId: updates?.handoffs.get(id)?.contactId ?? (!newLifetime && liveIds.has(id) ? id : undefined),
+          side: defender.side, piece: defender.piece,
+          position: { ...defender.body.position }, liftedAt: now, fromPause,
+          canceled: change?.canceled,
+        });
+      }
+      Matter.Composite.remove(engine.world, defender.body);
+      defenders.delete(id);
     }
+  }
 
-    if (!IsContactOnSide(contact.worldPosition, side)) {
-      continue;
+  for (const [id, contact] of contacts) {
+    let defender = defenders.get(id);
+    if (defender?.piece !== contact.piece) {
+      const side = placementSide(contact.position, contact.piece, contact.angle);
+      if (!side || (!defender && countDefenders(side) >= DEFENDERS_PER_SIDE)) continue;
+      if (!defender && phase === "ballInMotion") {
+        // A blink must return near the last pose. During a menu visit an
+        // existing defender can move before the tracker assigns its new ID.
+        let index = liftedDefenders.findIndex((lift) => lift.liveId === id && lift.side === side);
+        if (index < 0 && updates?.newlyRecognized.has(id)) {
+          index = liftedDefenders.findIndex((lift) => lift.piece === contact.piece && lift.side === side &&
+            (lift.liveId === undefined || !contacts.has(lift.liveId)) &&
+            ((lift.liveId === undefined && lift.fromPause) || distance(lift.position, contact.position) <= contact.piece.radius));
+        }
+        if (index < 0) continue;
+        liftedDefenders.splice(index, 1);
+      }
+      if (defender) Matter.Composite.remove(engine.world, defender.body);
+      defender = { side, piece: contact.piece, body: createSportsBumper(contact.piece) };
+      defenders.set(id, defender);
+      Matter.Composite.add(engine.world, defender.body);
     }
-
-    const slot = slots[slotIndex];
-    slot.contactId = contact.contactId;
-    slot.position = contact.worldPosition;
-    slotIndex += 1;
-  }
-}
-
-function IsContactOnSide(position: Vec, side: PlayerSide): boolean {
-  const minX = -layout.pitchHalfWidth + layout.defenderRadius;
-  const maxX = layout.pitchHalfWidth - layout.defenderRadius;
-  const minY = -layout.pitchHalfHeight + layout.defenderRadius;
-  const maxY = layout.pitchHalfHeight - layout.defenderRadius;
-  if (position.y < minY || position.y > maxY) {
-    return false;
-  }
-
-  if (side === "left") {
-    return position.x >= minX && position.x < 0;
-  }
-
-  return position.x <= maxX && position.x > 0;
-}
-
-function setSlotOccupied(slot: DefenderSlot, occupied: boolean): void {
-  slot.occupied = occupied;
-  syncSlotBody(slot);
-}
-
-function syncSlotBody(slot: DefenderSlot): void {
-  if (!slot.occupied) {
-    if (slot.body) {
-      Matter.Composite.remove(engine.world, slot.body);
-      slot.body = null;
+    // A defender that slides or turns must still collide at the real base.
+    const { body } = defender;
+    if (body.position.x !== contact.position.x || body.position.y !== contact.position.y) {
+      Matter.Body.setPosition(body, contact.position);
     }
-    return;
+    if (body.angle !== contact.angle) Matter.Body.setAngle(body, contact.angle);
   }
-
-  if (!slot.body) {
-    slot.body = Matter.Bodies.circle(slot.position.x, slot.position.y, layout.defenderRadius, {
-      label: "defender",
-      isStatic: true,
-      restitution: DEFENDER_RESTITUTION,
-      friction: 0.05,
-      frictionStatic: 0,
-    });
-    Matter.Composite.add(engine.world, slot.body);
-    return;
-  }
-
-  Matter.Body.setPosition(slot.body, slot.position);
+  UpdateMatchPhaseFromPlacements();
 }
 
 function UpdateMatchPhaseFromPlacements(): void {
@@ -797,7 +1231,7 @@ function UpdateMatchPhaseFromPlacements(): void {
 }
 
 function CanLaunchSwipe(): boolean {
-  if (phase === "setup" || phase === "goalPause") {
+  if (suspended || phase === "setup" || phase === "goalPause") {
     return false;
   }
 
@@ -809,9 +1243,9 @@ function CanLaunchSwipe(): boolean {
   return phase === "readyToShoot";
 }
 
-function TryLaunchSwipe(swipeContact: SwipeContactState, now: number, launchArmed = false): boolean {
+function qualifyingSwipeVelocity(swipeContact: SwipeContactState, now: number, released = false): Vec | null {
   if (!CanLaunchSwipe() || !ballBody || swipeContact.samples.length < 2) {
-    return false;
+    return null;
   }
 
   const samples = swipeContact.samples;
@@ -820,10 +1254,12 @@ function TryLaunchSwipe(swipeContact: SwipeContactState, now: number, launchArme
   const windowDelta = subtract(newest.position, oldest.position);
   const windowDistance = magnitude(windowDelta);
 
-  if (windowDistance < layout.minSwipeTravelDistance) {
+  // A live sensor flick must travel beyond resting-finger jitter.
+  const minimumTravel = Board.isOnDevice ? layout.ballRadius : layout.minSwipeTravelDistance;
+  if (windowDistance < minimumTravel) {
     swipeContact.armedAt = null;
     resetSwipePeak(swipeContact);
-    return false;
+    return null;
   }
 
   if (
@@ -832,7 +1268,7 @@ function TryLaunchSwipe(swipeContact: SwipeContactState, now: number, launchArme
   ) {
     swipeContact.armedAt = null;
     resetSwipePeak(swipeContact);
-    return false;
+    return null;
   }
 
   const windowDt = Math.max(newest.timestamp - oldest.timestamp, 1 / 240);
@@ -845,31 +1281,29 @@ function TryLaunchSwipe(swipeContact: SwipeContactState, now: number, launchArme
   const triggerSpeed = Math.max(windowedSpeed, swipeContact.peakSpeed);
   if (triggerSpeed < layout.minSwipeSpeed) {
     swipeContact.armedAt = null;
-    return false;
+    return null;
   }
 
   if (swipeContact.armedAt === null) {
     swipeContact.armedAt = now;
-    if (!launchArmed) {
-      return false;
+    if (!released) {
+      return null;
     }
   }
 
   const armedFor = now - swipeContact.armedAt;
   const droppingFromPeak = windowedSpeed < swipeContact.peakSpeed * SWIPE_PEAK_HOLD_RATIO;
-  if (!launchArmed && armedFor < SWIPE_LATCH_TIMEOUT_SECONDS && !droppingFromPeak) {
-    return false;
+  if (!released && armedFor < SWIPE_LATCH_TIMEOUT_SECONDS && !droppingFromPeak) {
+    return null;
   }
 
-  const direction =
-    swipeContact.peakSpeed > windowedSpeed
-      ? normalize(swipeContact.peakVelocity)
-      : normalize(windowDelta);
+  return swipeContact.peakSpeed > windowedSpeed ? swipeContact.peakVelocity : scaleVector(windowDelta, 1 / windowDt);
+}
 
-  const swipeStrength = inverseLerp(layout.minSwipeSpeed, layout.maxSwipeSpeed, triggerSpeed);
+function launchSwipeVelocity(velocity: Vec): void {
+  const swipeStrength = inverseLerp(layout.minSwipeSpeed, layout.maxSwipeSpeed, magnitude(velocity));
   const impulseMagnitude = lerp(layout.minShotImpulse, layout.maxShotImpulse, swipeStrength);
-  LaunchShot(scaleVector(direction, impulseMagnitude));
-  return true;
+  LaunchShot(scaleVector(normalize(velocity), impulseMagnitude));
 }
 
 function LaunchShot(impulse: Vec): void {
@@ -904,6 +1338,7 @@ function CompleteShotTurn(): void {
   ballStillTimer = 0;
   currentTurn = currentTurn === "left" ? "right" : "left";
   phase = "readyToShoot";
+  updateDefenders(Board.isOnDevice ? latestBoardGlyphs : simulatedContacts);
 }
 
 function TryCompleteShotTurnIfSettled(): void {
@@ -973,14 +1408,15 @@ function RegisterGoal(scorer: PlayerSide): void {
 
   phase = "goalPause";
   goalPauseTimer = 0;
-  scoreDisplayTimer = SCORE_DISPLAY_DURATION;
   playGoalCheer();
 }
 
-function playGoalCheer(): void {
+function playGoalCheer(fromStart = true): void {
   try {
-    goalCheerAudio.pause();
-    goalCheerAudio.currentTime = 0;
+    if (fromStart) {
+      goalCheerAudio.pause();
+      goalCheerAudio.currentTime = 0;
+    }
     void goalCheerAudio.play().catch(() => {
       // Some browser previews can block audio until they receive a user gesture.
     });
@@ -990,6 +1426,7 @@ function playGoalCheer(): void {
 }
 
 function stopGoalCheer(): void {
+  cheerPausedWithMatch = false;
   try {
     goalCheerAudio.pause();
     goalCheerAudio.currentTime = 0;
@@ -1027,11 +1464,12 @@ function CancelActiveShot(): void {
 
 function resetMatch(): void {
   stopGoalCheer();
+  resumeShotAt = 0;
+  surfaceCancellation = null;
   leftScore = 0;
   rightScore = 0;
   ballStillTimer = 0;
   goalPauseTimer = 0;
-  scoreDisplayTimer = 0;
   didPrepareInitialKickoff = false;
   didServeInitialKickoff = false;
   currentTurn = "left";
@@ -1041,106 +1479,71 @@ function resetMatch(): void {
   StopBall();
   ResetBallToCenter();
 
-  if (!Board.isOnDevice) {
-    simulatedContacts.clear();
-  }
+  pointerDefenderDrags.clear();
+  simulatedContacts.clear();
+  updateDefenders(Board.isOnDevice ? latestBoardGlyphs : simulatedContacts);
 }
 
 function autoSetupDefenders(): void {
-  if (Board.isOnDevice) {
-    return;
-  }
+  if (Board.isOnDevice || phase === "ballInMotion" || phase === "goalPause") return;
 
+  pointerDefenderDrags.clear();
   simulatedContacts.clear();
-  const leftXs = [-layout.pitchHalfWidth * 0.64, -layout.pitchHalfWidth * 0.34];
-  const rightXs = [layout.pitchHalfWidth * 0.34, layout.pitchHalfWidth * 0.64];
-  const ys = [-layout.pitchHalfHeight * 0.58, 0, layout.pitchHalfHeight * 0.58];
-
-  for (const x of leftXs) {
-    for (const y of ys) {
-      addSimulatedDefender({ x, y });
+  const pieces = sportsPieces.values();
+  for (const side of [-1, 1]) {
+    for (const column of [0.32, 0.67]) {
+      for (const row of [-0.43, 0.43]) {
+        const piece = pieces.next().value!;
+        addSimulatedDefender(piece, {
+          x: side * layout.pitchHalfWidth * column,
+          y: row * layout.pitchHalfHeight,
+        });
+      }
     }
   }
-
-  for (const x of rightXs) {
-    for (const y of ys) {
-      addSimulatedDefender({ x, y });
-    }
-  }
+  updateDefenders(simulatedContacts);
 }
 
-function canPlaceBrowserDefender(position: Vec): boolean {
-  if (didServeInitialKickoff && phase !== "setup" && phase !== "readyToShoot") {
-    return false;
-  }
+function beginBrowserDefenderDrag(position: Vec): DefenderContact | null {
+  if (phase === "goalPause") return null;
+  const existing = Array.from(simulatedContacts.values()).find((contact) =>
+    distance(contact.position, position) <= contact.piece.radius,
+  );
+  if (existing) return existing;
+  if (phase === "ballInMotion") return null;
 
-  return IsContactOnSide(position, "left") || IsContactOnSide(position, "right");
-}
-
-function beginBrowserDefenderDrag(position: Vec): number {
-  const existing = findNearestSimulatedDefender(position);
-  if (existing) {
-    existing.position = clampDefenderPosition(position);
-    return existing.contactId;
-  }
+  const placed = new Set(Array.from(simulatedContacts.values(), (contact) => contact.piece.glyphId));
+  const piece = Array.from(sportsPieces.values()).find((candidate) => !placed.has(candidate.glyphId));
+  if (!piece) return null;
 
   const side = position.x < 0 ? "left" : "right";
-  const sideCount = Array.from(simulatedContacts.values()).filter((contact) =>
-    IsContactOnSide(contact.position, side),
-  ).length;
-  if (sideCount >= DEFENDERS_PER_SIDE) {
-    return -1;
-  }
-
-  return addSimulatedDefender(position);
+  if (countDefenders(side) >= DEFENDERS_PER_SIDE) return null;
+  const contact = addSimulatedDefender(piece, position);
+  if (contact) updateDefenders(simulatedContacts);
+  return contact;
 }
 
-function addSimulatedDefender(position: Vec): number {
-  const contactId = nextSimulatedContactId;
-  nextSimulatedContactId += 1;
-  simulatedContacts.set(contactId, {
-    contactId,
-    position: clampDefenderPosition(position),
-  });
-  return contactId;
+function addSimulatedDefender(piece: SportsPiece, position: Vec): DefenderContact | null {
+  const angle = position.x < 0 ? 0 : -Math.PI;
+  if (!placementSide(position, piece, angle)) return null;
+  const contact = { contactId: nextSimulatedContactId++, piece, position, angle };
+  simulatedContacts.set(contact.contactId, contact);
+  return contact;
 }
 
 function moveBrowserDefender(contactId: number, position: Vec): void {
   const contact = simulatedContacts.get(contactId);
-  if (!contact) {
-    return;
-  }
+  if (!contact) return;
 
-  contact.position = clampDefenderPosition(position);
-}
-
-function findNearestSimulatedDefender(position: Vec): SimulatedContact | null {
-  let nearest: SimulatedContact | null = null;
-  let nearestDistance = Number.POSITIVE_INFINITY;
-
-  for (const contact of simulatedContacts.values()) {
-    const d = distance(contact.position, position);
-    if (d < nearestDistance && d <= layout.defenderRadius * 2.1) {
-      nearest = contact;
-      nearestDistance = d;
-    }
-  }
-
-  return nearest;
-}
-
-function clampDefenderPosition(position: Vec): Vec {
-  const side: PlayerSide = position.x < 0 ? "left" : "right";
-  const minX = -layout.pitchHalfWidth + layout.defenderRadius;
-  const maxX = layout.pitchHalfWidth - layout.defenderRadius;
-  const minY = -layout.pitchHalfHeight + layout.defenderRadius;
-  const maxY = layout.pitchHalfHeight - layout.defenderRadius;
-  const x = clamp(position.x, minX, maxX);
-
-  return {
-    x: side === "left" ? Math.min(x, -layout.defenderRadius) : Math.max(x, layout.defenderRadius),
-    y: clamp(position.y, minY, maxY),
+  const side = contact.position.x < 0 ? "left" : "right";
+  const { min, max } = placementBounds(contact.piece, contact.angle, side);
+  const next = {
+    x: clamp(position.x, min.x, max.x),
+    y: clamp(position.y, min.y, max.y),
   };
+  if (!placementSide(next, contact.piece, contact.angle)) return;
+  contact.position = next;
+  updateDefenders(simulatedContacts);
 }
 
 function updateBallTrail(): void {
@@ -1179,122 +1582,28 @@ function ResolveBallDefenderCollisions(incomingVelocity: Vec | null): void {
     return;
   }
 
-  // Matter's resting threshold suppresses restitution at this game's small world scale.
-  const ballPosition = getBallPosition();
-  const collisionRadius = layout.ballRadius + layout.defenderRadius;
-  const separationRadius = collisionRadius + layout.uniformScale * COLLISION_SEPARATION_EPSILON;
-  const defenderCenters: Vec[] = [];
-  let manifoldNormalSum: Vec = { x: 0, y: 0 };
-
-  for (const slot of allSlots) {
-    if (!slot.occupied || !slot.body) {
-      continue;
-    }
-
-    const center = { x: slot.body.position.x, y: slot.body.position.y };
-    defenderCenters.push(center);
-    const centerToBall = subtract(ballPosition, center);
-    const centerDistance = magnitude(centerToBall);
-    if (centerDistance > collisionRadius) {
-      continue;
-    }
-
-    const normal = centerDistance > Number.EPSILON
-      ? scaleVector(centerToBall, 1 / centerDistance)
-      : scaleVector(normalize(incomingVelocity), -1);
-    const normalVelocity = dot(incomingVelocity, normal);
-    if (normalVelocity >= 0) {
-      continue;
-    }
-
-    // Weight each simultaneous contact by its closing speed. This preserves a
-    // symmetric manifold normal regardless of defender slot order.
-    manifoldNormalSum = add(manifoldNormalSum, scaleVector(normal, -normalVelocity));
+  // Matter separates the traced bumpers, but its resting threshold suppresses
+  // rebounds at this world scale. Resolve all touching normals together.
+  const normals: Vec[] = [];
+  let closingOnDefender = false;
+  const pairs: Matter.Pair[] = engine.pairs.list;
+  for (const { isActive, collision } of pairs) {
+    if (!isActive) continue;
+    const { parentA, parentB, normal } = collision;
+    if (parentA !== ballBody && parentB !== ballBody) continue;
+    const other = parentA === ballBody ? parentB : parentA;
+    const outward = parentA === ballBody ? normal : scaleVector(normal, -1);
+    normals.push(outward);
+    if (other.label === "defender" && dot(incomingVelocity, outward) < 0) closingOnDefender = true;
   }
-
-  const manifoldNormal = normalize(manifoldNormalSum);
-  if (magnitude(manifoldNormal) <= Number.EPSILON) {
-    return;
+  if (closingOnDefender) {
+    Matter.Body.setVelocity(ballBody, ResolveDefenderManifoldVelocity(incomingVelocity, normals));
   }
-
-  const separationDistance = FindDefenderManifoldExitDistance(
-    ballPosition,
-    manifoldNormal,
-    defenderCenters,
-    separationRadius,
-  );
-  const separatedPosition = add(ballPosition, scaleVector(manifoldNormal, separationDistance));
-  Matter.Body.setPosition(ballBody, separatedPosition);
-
-  const contactTolerance = Math.max(separationRadius * 1e-7, Number.EPSILON * 100);
-  const contactNormals = defenderCenters.flatMap((center) => {
-    const centerToBall = subtract(separatedPosition, center);
-    const centerDistance = magnitude(centerToBall);
-    return Math.abs(centerDistance - separationRadius) <= contactTolerance
-      ? [scaleVector(centerToBall, 1 / centerDistance)]
-      : [];
-  });
-
-  Matter.Body.setVelocity(
-    ballBody,
-    ResolveDefenderManifoldVelocity(incomingVelocity, contactNormals, manifoldNormal),
-  );
-}
-
-function FindDefenderManifoldExitDistance(
-  position: Vec,
-  direction: Vec,
-  defenderCenters: Vec[],
-  collisionRadius: number,
-): number {
-  const intervals: Array<{ start: number; end: number }> = [];
-  const radiusSquared = collisionRadius * collisionRadius;
-
-  for (const center of defenderCenters) {
-    const centerToPosition = subtract(position, center);
-    const projectedDistance = dot(centerToPosition, direction);
-    const perpendicularDistanceSquared = Math.max(
-      0,
-      dot(centerToPosition, centerToPosition) - projectedDistance * projectedDistance,
-    );
-    if (perpendicularDistanceSquared > radiusSquared) {
-      continue;
-    }
-
-    const halfInterval = Math.sqrt(Math.max(0, radiusSquared - perpendicularDistanceSquared));
-    const start = -projectedDistance - halfInterval;
-    const end = -projectedDistance + halfInterval;
-    if (end >= 0) {
-      intervals.push({ start, end });
-    }
-  }
-
-  intervals.sort((left, right) => left.start - right.start || left.end - right.end);
-
-  let foundContainingInterval = false;
-  let blockedUntil = 0;
-  for (const interval of intervals) {
-    if (!foundContainingInterval) {
-      if (interval.start <= 0 && interval.end >= 0) {
-        foundContainingInterval = true;
-        blockedUntil = interval.end;
-      }
-      continue;
-    }
-
-    if (interval.start > blockedUntil) {
-      break;
-    }
-    blockedUntil = Math.max(blockedUntil, interval.end);
-  }
-
-  return foundContainingInterval ? blockedUntil : 0;
 }
 
 function ResolveDefenderManifoldVelocity(
   incomingVelocity: Vec,
   contactNormals: Vec[],
-  fallbackNormal: Vec,
 ): Vec {
   const constraints = contactNormals.map((normal) => {
     const normalVelocity = dot(incomingVelocity, normal);
@@ -1303,30 +1612,11 @@ function ResolveDefenderManifoldVelocity(
       minimumVelocity: normalVelocity < 0 ? -DEFENDER_RESTITUTION * normalVelocity : 0,
     };
   });
-  if (constraints.length > 0) {
-    const resolvedVelocity = FindClosestVelocitySatisfyingConstraints(incomingVelocity, constraints);
-    if (resolvedVelocity) {
-      return resolvedVelocity;
-    }
-
-    // Degenerate contact wedges may not permit every restitution target. They
-    // must still prevent the ball from moving back into any touching defender.
-    const nonPenetratingVelocity = FindClosestVelocitySatisfyingConstraints(
-      incomingVelocity,
-      constraints.map(({ normal }) => ({ normal, minimumVelocity: 0 })),
-    );
-    if (nonPenetratingVelocity) {
-      return nonPenetratingVelocity;
-    }
-  }
-
-  const fallbackNormalVelocity = dot(incomingVelocity, fallbackNormal);
-  return fallbackNormalVelocity < 0
-    ? subtract(
-        incomingVelocity,
-        scaleVector(fallbackNormal, (1 + DEFENDER_RESTITUTION) * fallbackNormalVelocity),
-      )
-    : incomingVelocity;
+  // In a narrow wedge the restitution targets can conflict. A zero velocity
+  // always satisfies the fallback requirement of no penetration.
+  return FindClosestVelocitySatisfyingConstraints(incomingVelocity, constraints)
+    ?? FindClosestVelocitySatisfyingConstraints(incomingVelocity, constraints.map(({ normal }) => ({ normal, minimumVelocity: 0 })))
+    ?? { x: 0, y: 0 };
 }
 
 function FindClosestVelocitySatisfyingConstraints(
@@ -1471,16 +1761,29 @@ function renderField(): void {
 }
 
 function renderDefenders(): void {
-  for (const slot of allSlots) {
-    if (!slot.occupied) {
-      continue;
+  // Physical pieces are their own markers. Only the browser needs stand-ins.
+  if (Board.isOnDevice) return;
+  for (const { body, piece, side } of defenders.values()) {
+    const point = worldToScreen(body.position);
+    ctx.save();
+    ctx.translate(point.x, point.y);
+    ctx.rotate(-body.angle);
+    ctx.scale(layout.pixelScale, -layout.pixelScale);
+    ctx.beginPath();
+    for (const [i, vertex] of piece.vertices.entries()) {
+      if (i === 0) ctx.moveTo(vertex.x, vertex.y);
+      else ctx.lineTo(vertex.x, vertex.y);
     }
-
-    const point = worldToScreen(slot.position);
-    const radius = layout.defenderRadius * layout.pixelScale;
-    drawDisc(point, radius * 1.16, SHADOW_COLOR, { x: radius * 0.15, y: radius * 0.2 }, 0.72);
-    drawDisc(point, radius, slot.side === "left" ? LEFT_COLOR : RIGHT_COLOR);
-    drawDisc(point, radius * 0.52, "rgba(255,255,255,0.9)");
+    ctx.closePath();
+    ctx.fillStyle = side === "left" ? LEFT_COLOR : RIGHT_COLOR;
+    ctx.fill();
+    ctx.restore();
+    const image = previewArt.get(piece.glyphId);
+    if (image?.naturalWidth) {
+      const size = piece.radius * layout.pixelScale * 2;
+      const width = size * image.naturalWidth / image.naturalHeight;
+      ctx.drawImage(image, point.x - width / 2, point.y - size / 2, width, size);
+    }
   }
 }
 
@@ -1520,50 +1823,64 @@ function renderBall(): void {
   drawDisc({ x: point.x - radius * 0.28, y: point.y - radius * 0.28 }, radius * 0.28, "rgba(255,255,255,0.8)");
 }
 
+function getSeatHud(color: string) {
+  return {
+    panel: getElement<HTMLElement>(`${color}-seat`),
+    value: getElement<HTMLElement>(`${color}-value`),
+    prompt: getElement<HTMLElement>(`${color}-prompt`),
+  };
+}
+
 function renderUi(): void {
-  scoreEl.textContent = `Blue ${leftScore} - ${rightScore} Orange`;
-  statusEl.textContent = getStatusMessage();
-  setupEl.textContent = `Blue defenders: ${countOccupied(leftSlots)}/${leftSlots.length}    Orange defenders: ${countOccupied(rightSlots)}/${rightSlots.length}`;
-  document.body.classList.toggle("show-score", scoreDisplayTimer > 0 || didServeInitialKickoff);
-  document.body.classList.toggle("show-setup", shouldShowSetupInstructions());
-  document.body.classList.toggle("show-goal", phase === "goalPause");
-}
-
-function shouldShowSetupInstructions(): boolean {
-  return !didServeInitialKickoff || phase === "setup";
-}
-
-function getStatusMessage(): string {
-  if (!Board.isOnDevice && phase === "setup" && simulatedContacts.size === 0) {
-    return "Browser preview. Place defenders or use auto setup.";
+  for (const side of ["left", "right"] as const) {
+    const { panel, value, prompt } = seatHud[side];
+    const count = kickoffCount(side);
+    const score = side === "left" ? leftScore : rightScore;
+    const number = didServeInitialKickoff ? String(score) : `${count}/${DEFENDERS_PER_SIDE}`;
+    const message = getSeatPrompt(side, count);
+    // The HUD is a live region. Announce changes once, not on every frame.
+    if (value.textContent !== number) value.textContent = number;
+    if (prompt.textContent !== message) prompt.textContent = message;
+    panel.classList.toggle("to-shoot", phase === "readyToShoot" && currentTurn === side);
   }
+  autoSetupButton.toggleAttribute("disabled", phase === "ballInMotion" || phase === "goalPause");
+  document.body.classList.toggle("show-setup", phase === "setup");
+  document.body.classList.toggle("show-goal", phase === "goalPause");
 
+  const ball = worldToScreen(getBallPosition());
+  const radius = layout.ballRadius * layout.pixelScale;
+  for (const { panel } of Object.values(seatHud)) {
+    const rect = panel.getBoundingClientRect();
+    panel.classList.toggle("over-ball", ballInPlay &&
+      ball.x + radius >= rect.left && ball.x - radius <= rect.right &&
+      ball.y + radius >= rect.top && ball.y - radius <= rect.bottom);
+  }
+}
+
+function getSeatPrompt(side: PlayerSide, count: number): string {
   switch (phase) {
     case "setup":
-      return `Place ${DEFENDERS_PER_SIDE} robot defenders anywhere on each team's half.`;
+      return count === DEFENDERS_PER_SIDE ? "Team ready" : `Place any ${DEFENDERS_PER_SIDE} Sports pieces on your half.`;
     case "readyToShoot":
-      return `${getTurnLabel()} to shoot.`;
+      if (side === currentTurn) return "Flick the ball";
+      return currentTurn === "left" ? "Blue to shoot" : "Orange to shoot";
     case "ballInMotion":
-      return "Ball in play.";
+      return "Ball in play";
     case "goalPause":
-      return `${lastScoringSide === "left" ? "Blue" : "Orange"} scores!`;
+      return side === lastScoringSide ? "Goal!" : "You kick off next";
   }
 }
 
-function getTurnLabel(): string {
-  return currentTurn === "left" ? "Blue" : "Orange";
-}
-
-function AllSlotsOccupied(): boolean {
-  return countOccupied(leftSlots) === leftSlots.length && countOccupied(rightSlots) === rightSlots.length;
+function kickoffCount(side: PlayerSide): number {
+  const count = countDefenders(side);
+  if (didServeInitialKickoff || !boardRecovery?.fromPause || !boardRecovery.incompleteAtStart || boardRecovery.continuityConfirmed) return count;
+  const now = performance.now();
+  const unresolved = [...boardRecovery.displaced.values()].some((at) => now - at <= REDETECTION_WINDOW_MS);
+  return unresolved ? Math.min(count, boardRecovery.countsBeforePause[side]) : count;
 }
 
 function CanPlayWithCurrentDefenders(): boolean {
-  return didServeInitialKickoff || AllSlotsOccupied();
-}
-
-function countOccupied(slots: DefenderSlot[]): number {
-  return slots.reduce((total, slot) => total + (slot.contactId >= 0 ? 1 : 0), 0);
+  return didServeInitialKickoff || (kickoffCount("left") === DEFENDERS_PER_SIDE && kickoffCount("right") === DEFENDERS_PER_SIDE);
 }
 
 function getBallPosition(): Vec {
@@ -1600,6 +1917,13 @@ function pointerWorldPosition(event: PointerEvent): Vec {
   });
 }
 
+function boardContactWorldPosition(contact: Pick<BoardContact, "x" | "y">): Vec {
+  return screenToWorld({
+    x: contact.x * layout.cssWidth / BOARD_WIDTH,
+    y: contact.y * layout.cssHeight / BOARD_HEIGHT,
+  });
+}
+
 function isActiveContactPhase(phaseValue: BoardContactPhase): boolean {
   return (
     phaseValue !== BoardContactPhase.None &&
@@ -1614,15 +1938,6 @@ function isSwipeContactPhase(phaseValue: BoardContactPhase): boolean {
     phaseValue === BoardContactPhase.Ended ||
     phaseValue === BoardContactPhase.Canceled
   );
-}
-
-function pruneSwipeContactState(contacts: Map<number, SwipeContactState>, activeContactIds: number[]): void {
-  const active = new Set(activeContactIds);
-  for (const contactId of contacts.keys()) {
-    if (!active.has(contactId)) {
-      contacts.delete(contactId);
-    }
-  }
 }
 
 function drawDisc(

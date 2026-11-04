@@ -40,72 +40,97 @@ canvas {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  padding: 18px 22px 20px;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  font-variant-numeric: tabular-nums;
 }
 
-#score {
-  justify-self: center;
-  min-width: 260px;
-  min-height: 38px;
-  padding: 7px 18px 8px;
-  border-radius: 8px;
-  background: rgba(7, 18, 14, 0.46);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  font-size: clamp(20px, 3.2vh, 32px);
-  font-weight: 800;
-  line-height: 1.2;
-  text-align: center;
-  opacity: 0;
-  transition: opacity 120ms ease;
+.seat {
+  --team-color: #63cfff;
+  position: absolute;
+  top: clamp(8px, 2.5vh, 28px);
+  width: clamp(120px, 22vw, 300px);
+  padding: 8px 14px 10px;
+  border-top: 4px solid var(--team-color);
+  border-radius: 6px;
+  background: rgba(8, 28, 19, 0.92);
+  box-shadow: 0 2px 8px #08211355;
 }
 
-body.show-score #score {
-  opacity: 1;
+#blue-seat { left: 2.5vw; }
+#orange-seat { right: 2.5vw; --team-color: #ffb04d; }
+
+.seat-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: clamp(16px, 2vw, 30px);
+  font-weight: 750;
+  color: var(--team-color);
 }
 
-#status {
-  align-self: start;
-  justify-self: center;
-  max-width: min(780px, calc(100vw - 44px));
-  padding: 8px 14px;
-  border-radius: 8px;
-  background: rgba(7, 18, 14, 0.42);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  font-size: clamp(15px, 2.2vh, 21px);
-  font-weight: 700;
-  line-height: 1.25;
-  text-align: center;
-  opacity: 0;
-  transition: opacity 120ms ease;
+.seat-heading strong {
+  margin-inline-start: auto;
+  color: white;
+  font-size: 1.45em;
+  line-height: 1;
 }
 
-body.show-setup #status,
-body.show-score #status {
-  opacity: 1;
-}
-
-#setup {
-  justify-self: center;
-  max-width: min(860px, calc(100vw - 44px));
-  min-height: 28px;
-  padding: 5px 12px 6px;
-  border-radius: 8px;
-  background: rgba(7, 18, 14, 0.36);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  font-size: clamp(13px, 1.9vh, 18px);
+.seat p {
+  margin: 0.3em 0 0;
+  font-size: clamp(14px, 1.8vw, 22px);
   font-weight: 650;
-  line-height: 1.25;
-  text-align: center;
-  opacity: 0;
-  transition: opacity 120ms ease;
+  line-height: 1.15;
 }
 
-body.show-setup #setup {
-  opacity: 1;
+.seat.to-shoot {
+  background: var(--team-color);
+  color: #081c13;
 }
+
+.seat.over-ball { opacity: 0.18; }
+
+.to-shoot .seat-heading,
+.to-shoot .seat-heading strong {
+  color: inherit;
+}
+
+.setup-piece {
+  display: none;
+  width: 1.8em;
+  height: 1.8em;
+  object-fit: contain;
+}
+
+.show-setup .setup-piece { display: block; }
+
+/* Each short edge has a reader. Leave the middle of that edge open for the goal. */
+.board-device {
+  --board-px: min(0.05208333vw, 0.09259259vh);
+  --inset: calc(48 * var(--board-px));
+}
+
+.board-device .seat {
+  width: calc(310 * var(--board-px));
+  padding: calc(16 * var(--board-px));
+  transform-origin: top left;
+}
+
+.board-device #blue-seat {
+  left: var(--inset);
+  top: var(--inset);
+  transform: rotate(90deg) translateY(-100%);
+}
+
+.board-device #orange-seat {
+  left: calc(100% - var(--inset));
+  top: calc(100% - var(--inset));
+  right: auto;
+  transform: rotate(-90deg) translateY(-100%);
+}
+
+.board-device .seat-heading { font-size: calc(34 * var(--board-px)); }
+.board-device .seat-heading strong,
+.board-device .seat p { font-size: calc(48 * var(--board-px)); }
+.board-device.show-setup .seat p { font-size: calc(32 * var(--board-px)); }
 
 #goal-banner {
   position: absolute;
@@ -128,6 +153,17 @@ body.show-setup #setup {
   transform: translate(-50%, -50%) scale(0.55);
   will-change: opacity, transform;
 }
+
+#goal-banner span + span { display: none; }
+
+.board-device #goal-banner {
+  display: flex;
+  gap: 4vw;
+  font-size: 12vh;
+}
+
+.board-device #goal-banner span { display: block; transform: rotate(90deg); }
+.board-device #goal-banner span + span { transform: rotate(-90deg); }
 
 body.show-goal #goal-banner {
   visibility: visible;
@@ -212,13 +248,21 @@ body.board-device #dev-controls {
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
 }
 
+#dev-controls button:disabled { opacity: 0.55; cursor: default; }
+
 #dev-controls button:active {
   transform: translateY(1px);
 }
 
 @media (max-width: 700px) {
-  #hud {
-    padding: 10px 12px 12px;
+  .browser-preview .seat {
+    width: min(44vw, 210px);
+    padding: 6px 9px;
+  }
+
+  .browser-preview .setup-piece {
+    width: 1.4em;
+    height: 1.4em;
   }
 
   #dev-controls {
@@ -238,4 +282,8 @@ body.board-device #dev-controls {
   body.show-goal #goal-banner {
     animation: goal-fade 1.15s ease-out both;
   }
+}
+
+body.show-goal.match-suspended #goal-banner {
+  animation-play-state: paused;
 }

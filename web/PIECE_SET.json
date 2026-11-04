@@ -1,0 +1,151 @@
+{
+  "id": "sports",
+  "display_name": "Sports",
+  "model_file": "sports_v0.1.0.tflite",
+  "bundle_model": "model.tflite",
+  "facing_offset_deg": 0,
+  "footprints": "public/piece-footprints.json",
+  "pieces": {
+    "1": {
+      "name": "Baseball player",
+      "copies": 1,
+      "size_mm": [
+        33.6,
+        30.9
+      ],
+      "size_px": [
+        121,
+        111
+      ],
+      "shape": "round base about 32 mm"
+    },
+    "2": {
+      "name": "Hockey player",
+      "copies": 1,
+      "size_mm": [
+        35.5,
+        32.3
+      ],
+      "size_px": [
+        128,
+        116
+      ],
+      "shape": "round base about 34 mm"
+    },
+    "3": {
+      "name": "Cyclist",
+      "copies": 1,
+      "size_mm": [
+        33.6,
+        33.1
+      ],
+      "size_px": [
+        121,
+        119
+      ],
+      "shape": "round base about 33 mm"
+    },
+    "4": {
+      "name": "Soccer player",
+      "copies": 1,
+      "size_mm": [
+        33.6,
+        39.0
+      ],
+      "size_px": [
+        121,
+        140
+      ],
+      "shape": "roundish base 34\u00d739 mm"
+    },
+    "5": {
+      "name": "Tennis player",
+      "copies": 1,
+      "size_mm": [
+        33.6,
+        43.3
+      ],
+      "size_px": [
+        121,
+        156
+      ],
+      "shape": "long base 34\u00d743 mm, points along its facing"
+    },
+    "6": {
+      "name": "Football player",
+      "copies": 1,
+      "size_mm": [
+        36.5,
+        29.6
+      ],
+      "size_px": [
+        131,
+        107
+      ],
+      "shape": "roundish base 37\u00d730 mm"
+    },
+    "7": {
+      "name": "Swimmer",
+      "copies": 1,
+      "size_mm": [
+        33.6,
+        29.8
+      ],
+      "size_px": [
+        121,
+        107
+      ],
+      "shape": "round base about 32 mm"
+    },
+    "8": {
+      "name": "Basketball player",
+      "copies": 1,
+      "size_mm": [
+        33.6,
+        29.4
+      ],
+      "size_px": [
+        121,
+        106
+      ],
+      "shape": "round base about 32 mm"
+    }
+  },
+  "box_total": 8,
+  "glyphs": {
+    "1": "Baseball player",
+    "2": "Hockey player",
+    "3": "Cyclist",
+    "4": "Soccer player",
+    "5": "Tennis player",
+    "6": "Football player",
+    "7": "Swimmer",
+    "8": "Basketball player"
+  },
+  "aliases": {
+    "1": [
+      "player"
+    ],
+    "2": [
+      "player"
+    ],
+    "3": [
+      "player"
+    ],
+    "4": [
+      "player"
+    ],
+    "5": [
+      "player"
+    ],
+    "6": [
+      "player"
+    ],
+    "7": [
+      "player"
+    ],
+    "8": [
+      "player"
+    ]
+  }
+}

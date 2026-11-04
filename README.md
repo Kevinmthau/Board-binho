@@ -3,10 +3,21 @@
 Board Binho is a Vite and TypeScript canvas game for Board. It uses the Board
 Web SDK for physical defenders and finger shots and ships as a `.webapp.zip`.
 
+## Play
+
+Use one Board Sports set. Blue defends the left goal and Orange defends the
+right. Place any four of the eight Sports pieces on each half. Leave room
+around each base and keep the center spot clear. Each side shows its count.
+
+Blue takes the first shot. Flick the ball toward the other goal. When the ball
+stops, the turn passes to the other side. After a goal, the team that conceded
+kicks off from the center. Restart a match from the Board pause menu.
+
 ## Layout
 
 - `web/`: game source and browser preview.
-- `web/public/model.tflite`: Piece Set touch model bundled with the game.
+- `web/public/model.tflite`: Board Sports v0.1.0 recognition model.
+- `web/PIECE_SET.json`: Sports glyphs, names, and sizes from the board-games-ai catalog.
 - `vendor/`: vendored Board Web SDK package.
 - `scripts/build_webapp.sh`: build, pack, install, and launch workflow.
 - `android/`: legacy Android wrapper, retained for compatibility only.
@@ -69,6 +80,12 @@ npm ci
 npm run dev
 ```
 
-The browser preview includes simulated defender placement and pointer swipe
-controls. Board hardware uses `Board.input.subscribe(...)` for live glyph and
-finger contacts.
+Click each half to place its four pieces, or select **Auto setup**. Drag a
+piece to reposition it. Drag across the ball from its center to shoot.
+
+Run the browser and SDK input regression tests in `web` with Node.js 20 or newer.
+
+```bash
+npx playwright install chromium
+npm test
+```
