@@ -9,12 +9,20 @@ npm ci
 npm run dev
 ```
 
-Click to place two Sports blockers on each half (four total), or choose **Auto setup**.
-Adjust their positions by dragging before the first shot. Once play starts,
+Click on your half to place four Sports blockers (eight total), or choose **Auto setup**.
+Exactly one piece must overlap each small goal box, including its boundary line;
+place the other three anywhere outside it on your half. Missing goalies and
+overfilled boxes show setup prompts and prevent kickoff until corrected.
+Adjust positions by dragging before the first shot. Once play starts,
 the blockers stay fixed through turns, goals, and pauses. Swipe from the ball
 to shoot, then let the other player shoot from where it stops.
 The browser uses pointer input and draws the Sports pieces. Board hardware
 uses the physical pieces and SDK finger input.
+
+Swipe practice accepts a finger starting beside the ball and moving through it.
+It responds during the swipe, without waiting for a release frame. Canceled
+sensor packets, paths that miss the ball, and swipes toward the wrong goal do
+not complete practice.
 
 After the Board pause menu closes, a piece can acquire a new contact ID while
 the SDK still reports its old one. During setup, the game counts a possible

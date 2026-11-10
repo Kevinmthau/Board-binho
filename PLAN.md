@@ -6,10 +6,15 @@ in place.
 
 ## Decisions
 
-The mode is COMPETITIVE. Shots alternate between two human players. Four Sports
-Pieces act as blockers in total, two on each half. The standard match ends at
+The mode is COMPETITIVE. Shots alternate between two human players. Eight Sports
+Pieces act as blockers in total, four on each half. The standard match ends at
 three goals. House Rules offer one, three, five, or seven goals.
 
+Players place four pieces on their own half: exactly one overlapping the small
+goal box nearest their goal, and three anywhere outside it. The rotated base
+determines overlap, including pieces straddling the box line. Setup prompts
+identify missing goalies and overfilled boxes and prevent kickoff until both
+halves have four valid pieces, including their goalie.
 Pieces are set before the opening shot, then remain fixed as blockers for the
 entire match, including goals and pauses. Players leave them untouched and take
 turns swiping the ball toward the opposite goal from wherever it stops. Browser
@@ -39,7 +44,10 @@ standards' private Harris-Hill hosting requirement.
 The browser suite covers the normal menu flow, native Board input, canceled
 contacts, pause and resume, tracker recovery, physics, tutorial retries and
 profile groups, house rules, results, fixed blockers, setup orientation touch
-gating, and flipped input.
+gating, and flipped input. Practice regressions replay a real Board finger trace
+that starts beside the ball and crosses it, including flipped input, sparse
+frames, paths that miss the ball, and canceled packets. Practice responds during
+the swipe instead of waiting for finger release.
 An offline test serves the production files from disk with the browser network
 disabled, then plays through a goal to the results screen.
 

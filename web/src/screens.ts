@@ -345,7 +345,7 @@ export class MatchScreens {
   }
   private rules() {
     return [
-      "Set four Sports Pieces total, two on each half, before kickoff. They stay in place as blockers for the whole match.",
+      "Place four Sports Pieces on your half: one in your goal box and three anywhere outside it. The first shot locks all eight pieces. They stay in place for the whole match.",
       "Take turns swiping the ball at each other’s goals. Leave the pieces untouched during play.",
       "A goal scores one point. The team that conceded takes the next kickoff.",
       "First to " +
@@ -359,7 +359,7 @@ export class MatchScreens {
       [
         "setup",
         "Set the blockers once",
-        rules[0] + " Use any Sports Pieces and keep the ball and midfield clear. Leave the pieces untouched during play.",
+        rules[0] + " The goal box is the small rectangle nearest your goal. A base overlapping its line counts as inside. Keep each base on your half and the center ball clear.",
       ],
       [
         "flick",

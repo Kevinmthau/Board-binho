@@ -12,8 +12,11 @@ need to be moved or touched for practice. HOW TO PLAY explains the rules;
 PRACTICE SWIPING repeats practice.
 
 Use one Board Sports set. Blue defends the left goal and Orange defends the
-right. Use four Sports pieces total, with two on each half. Leave room
-around each base and keep the center spot clear. Each side shows its count.
+right. Place four Sports pieces on your own half (eight total): one in your
+goal box and three anywhere outside it. The goal box is the small rectangle
+nearest the goal; a base overlapping its line counts as inside. Keep each base on its half
+and the center spot clear. Each side shows its count and flags a missing goalie
+or an overfilled box.
 Set the pieces once before kickoff, then leave them untouched as fixed blockers
 for the whole match.
 
@@ -102,9 +105,11 @@ npm ci
 npm run dev
 ```
 
-Click each half to place its two pieces, or select **Auto setup**. You can
-adjust their positions by dragging during setup. The first shot locks the
-blockers until the match is restarted. Take turns swiping from the ball to shoot.
+Click anywhere on each half to place its four pieces, or select **Auto setup**.
+Keep exactly one piece in each goal box and three outside it. You can adjust
+positions by dragging during setup. Kickoff waits until both teams are ready. The
+first shot locks the blockers until the match is restarted. Take turns swiping
+from the ball to shoot.
 
 Run the browser and SDK input regression tests in `web` with Node.js 20 or newer.
 

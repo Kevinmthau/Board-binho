@@ -34,11 +34,16 @@ const finger = (x: number, y: number, p: Phase) => ({
   ...piece(90, 0, x, y, p),
   t: Type.Finger,
 });
+const supportLineup = [
+  piece(21, 3, 90, 420), piece(22, 4, 500, 850),
+  piece(25, 7, 1830, 420), piece(26, 8, 1420, 850),
+];
 const lineup = [
   piece(11, 1, 320, 300),
   piece(12, 2, 650, 300),
   piece(15, 5, 1270, 300),
   piece(16, 6, 1600, 300),
+  ...supportLineup,
 ];
 
 async function packet(page: Page, ...c: ReturnType<typeof piece>[]) {
@@ -183,7 +188,7 @@ test("swipe practice needs no pieces, retries shots, ignores cancellation, and r
   await shoot(page);
   await page.clock.runFor(1000);
   await expect(page.locator("#coach")).toBeHidden();
-  await expect(page.locator("#blue-value")).toHaveText("0/2");
+  await expect(page.locator("#blue-value")).toHaveText("0/4");
   const groups = await page.evaluate(() =>
     localStorage.getItem("flick-soccer:tutorial-groups"),
   );
@@ -208,8 +213,61 @@ test("Practice Swiping repeats the lesson with blockers already set", async ({
   await shoot(page);
   await page.clock.runFor(1000);
   await expect(page.locator("#coach")).toBeHidden();
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
-  await expect(page.locator("#orange-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
+  await expect(page.locator("#orange-value")).toHaveText("4/4");
+});
+
+for (const flipped of [false, true]) {
+  test(`practice recognizes the real Board swipe through the ball before release with table flipped ${flipped}`, async ({ page }) => {
+    await host(page);
+    await choose(page);
+    await page.locator("#continue").click();
+    if (flipped) await page.locator("#flip").click();
+    // Captured on the Board: the finger starts left of the ball, then crosses it.
+    const path = [[663, 560], [735, 560], [817, 552], [876, 542], [946, 540], [1027, 540], [1116, 545]];
+    for (const [index, [x, y]] of path.entries()) {
+      await packet(page, finger(flipped ? 1920 - x : x, flipped ? 1080 - y : y, index === 0 ? Phase.Began : Phase.Moved));
+    }
+    await expect(page.locator("#coach-count")).toHaveText("Practice complete");
+    await page.clock.runFor(1000);
+    await expect(page.locator("#coach")).toBeHidden();
+    await expect(page.locator("#blue-value")).toHaveText("0/4");
+  });
+}
+
+test("practice responds to a live swipe starting on the ball without waiting for release", async ({ page }) => {
+  await host(page);
+  await choose(page);
+  await page.locator("#continue").click();
+  await packet(page, finger(960, 540, Phase.Began));
+  await packet(page, finger(1070, 540, Phase.Moved));
+  await expect(page.locator("#coach-count")).toHaveText("Practice complete");
+});
+
+test("practice requires a rightward path through the ball and discards canceled packets", async ({ page }) => {
+  await host(page);
+  await choose(page);
+  await page.locator("#continue").click();
+  // The endpoints cross the ball, but the actual path goes around it.
+  await packet(page, finger(663, 540, Phase.Began));
+  await packet(page, finger(663, 300, Phase.Moved));
+  await packet(page, finger(1200, 300, Phase.Moved));
+  await packet(page, finger(1200, 540, Phase.Ended));
+  await expect(page.locator("#coach-count")).toHaveText("Swipe practice");
+  await expect(page.locator("#coach-line")).toContainText("Try again");
+
+  await packet(page, finger(1200, 540, Phase.Began), finger(800, 540, Phase.Ended));
+  await expect(page.locator("#coach-count")).toHaveText("Swipe practice");
+  await packet(page, finger(663, 560, Phase.Began), finger(1116, 545, Phase.Moved), finger(1116, 545, Phase.Canceled));
+  await expect(page.locator("#coach-count")).toHaveText("Swipe practice");
+  await packet(page, finger(663, 560, Phase.Began));
+  await packet(page, finger(1116, 545, Phase.Moved), finger(1116, 545, Phase.Canceled));
+  await expect(page.locator("#coach-count")).toHaveText("Swipe practice");
+
+  // Even two samples suffice when the live segment travels through the ball.
+  await packet(page, finger(663, 560, Phase.Began));
+  await packet(page, finger(1116, 545, Phase.Moved));
+  await expect(page.locator("#coach-count")).toHaveText("Practice complete");
 });
 
 test("winning reaches results once and replay resets the match", async ({
@@ -236,7 +294,7 @@ test("winning reaches results once and replay resets the match", async ({
   await expect(page.locator("#result-score")).toContainText("1  –  0");
   await page.locator("#again").click();
   await page.clock.runFor(32);
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
 });
 
 test("How to Play opened from the Board menu freezes and resumes the same shot", async ({
@@ -318,14 +376,14 @@ test("untouched rotation drift cannot alter a blocker during setup", async ({
   await page.locator("#continue").click();
   await packet(
     page,
-    ...lineup.slice(0, 1),
+    ...lineup.filter(({ id }) => id !== 12),
     piece(14, 5, 880, 300, Phase.Began, 90),
   );
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
   await packet(page, piece(14, 5, 880, 300, Phase.Moved, 180, 0));
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
   await packet(page, piece(14, 5, 880, 300, Phase.Moved, 180, 1));
-  await expect(page.locator("#blue-value")).toHaveText("1/2");
+  await expect(page.locator("#blue-value")).toHaveText("3/4");
 });
 
 test("lifecycle pagehide pauses play and the Board menu uses standard icons", async ({
@@ -362,6 +420,9 @@ test("help explains fixed blockers and alternating swipes, and restarts on the f
   await host(page, true);
   await page.locator("#home-help").click();
   await expect(page.locator("#lesson-text")).toContainText("stay in place");
+  await expect(page.locator("#lesson-text")).toContainText("three anywhere outside it");
+  await expect(page.locator("#lesson-text")).toContainText("one in your goal box");
+  await expect(page.locator("#lesson-text")).toContainText("first shot locks all eight pieces");
   for (const demo of ["setup", "flick", "score"]) {
     await expect(page.locator("#lesson-clip")).toHaveAttribute(
       "data-demo",
@@ -448,13 +509,14 @@ for (const flipped of [false, true]) {
     await expect(page.locator("#coach-count")).toHaveText("Swipe practice");
     await expect(page.locator("#auto-setup-button")).toBeDisabled();
     if (flipped) await page.locator("#flip").click();
-    await page.mouse.move(480, 270);
+    await page.mouse.move(flipped ? 630 : 330, 270);
     await page.mouse.down();
     await page.mouse.move(flipped ? 400 : 560, 270);
+    await expect(page.locator("#coach-count")).toHaveText("Practice complete");
     await page.mouse.up();
     await page.clock.runFor(1000);
     await expect(page.locator("#coach")).toBeHidden();
-    await expect(page.locator("#blue-value")).toHaveText("0/2");
+    await expect(page.locator("#blue-value")).toHaveText("0/4");
   });
 }
 
@@ -502,6 +564,6 @@ test("flipping after a tracker restart keeps retired contact IDs retired", async
   await packet(page, ...fresh);
   await page.locator("#flip").click();
   await packet(page, { ...fresh[0], p: Phase.Ended });
-  await expect(page.locator("#orange-value")).toHaveText("1/2");
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
+  await expect(page.locator("#orange-value")).toHaveText("3/4");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
 });

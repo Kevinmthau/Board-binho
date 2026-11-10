@@ -7,9 +7,14 @@ function contact(id: number, g: number, x: number, y: number, t = Type.Glyph, p 
   return { id, g, x, y, t, p, o, touched: 0 };
 }
 
+const supportLineup = [
+  contact(21, 3, 90, 420), contact(22, 4, 500, 850),
+  contact(25, 7, 1830, 420), contact(26, 8, 1420, 850),
+];
 const lineup = [
   contact(11, 1, 320, 300), contact(12, 2, 650, 300),
   contact(15, 5, 1270, 300), contact(16, 6, 1600, 300),
+  ...supportLineup,
 ];
 
 async function openGame(page: Page, board = false, { observeTouch = false } = {}) {
@@ -66,7 +71,7 @@ async function openGame(page: Page, board = false, { observeTouch = false } = {}
   }
   await page.locator("#continue").click();
   await page.clock.runFor(32);
-  await expect(page.locator("#blue-value")).toHaveText("0/2");
+  await expect(page.locator("#blue-value")).toHaveText("0/4");
 }
 
 async function frame(page: Page, ...events: ReturnType<typeof contact>[]) {
@@ -117,8 +122,8 @@ test("a browser shot survives a resize, scores once and gives Orange the kickoff
   await openGame(page);
   await page.getByRole("button", { name: "Auto setup" }).click({ force: true });
   await page.clock.runFor(32);
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
-  await expect(page.locator("#orange-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
+  await expect(page.locator("#orange-value")).toHaveText("4/4");
   await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
 
   await page.mouse.move(480, 270);
@@ -138,23 +143,23 @@ test("a browser shot survives a resize, scores once and gives Orange the kickoff
 
   await page.getByRole("button", { name: "Reset" }).click({ force: true });
   await page.clock.runFor(32);
-  await expect(page.locator("#blue-value")).toHaveText("0/2");
-  await expect(page.locator("#orange-value")).toHaveText("0/2");
+  await expect(page.locator("#blue-value")).toHaveText("0/4");
+  await expect(page.locator("#orange-value")).toHaveText("0/4");
 });
 
-test("four Board blockers enable kickoff without circle markers, and hands do not count", async ({ page }) => {
+test("eight Board blockers enable kickoff without circle markers, and hands do not count", async ({ page }) => {
   await openGame(page, true);
   await expect(page.getByRole("button", { name: "Auto setup" })).toBeHidden();
   const canvasPixels = () => page.locator("#game-canvas").evaluate((canvas) => (canvas as HTMLCanvasElement).toDataURL());
   const emptyPitch = await canvasPixels();
   await frame(page, ...lineup.slice(1),
     contact(40, 1, 320, 300, Type.Blob), contact(41, 9, 330, 300), contact(42, 1, 960, 540));
-  await expect(page.locator("#blue-value")).toHaveText("1/2");
-  await expect(page.locator("#orange-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("3/4");
+  await expect(page.locator("#orange-value")).toHaveText("4/4");
   // The extra hockey player has its own contactId, even though its glyph is already in play.
   await frame(page, contact(11, 2, 320, 300));
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
-  await expect(page.locator("#orange-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
+  await expect(page.locator("#orange-value")).toHaveText("4/4");
   await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
   expect(await canvasPixels() === emptyPitch).toBe(true);
   await page.clock.runFor(650);
@@ -162,33 +167,134 @@ test("four Board blockers enable kickoff without circle markers, and hands do no
   await frame(page, contact(90, 0, 960, 540, Type.Finger));
   await frame(page, contact(90, 0, 1080, 540, Type.Finger, Phase.Moved),
     contact(11, 2, 320, 300, Type.Glyph, Phase.Ended));
-  await expect(page.locator("#blue-value")).toHaveText("1/2");
+  await expect(page.locator("#blue-value")).toHaveText("3/4");
   await expect(page.locator("#blue-prompt")).toContainText("Place");
 });
 
-test("manual browser placement caps each half at two and keeps dragged pieces on their side", async ({ page }) => {
+test("manual browser placement caps each half at four and keeps dragged pieces on their side", async ({ page }) => {
   await openGame(page);
-  for (const [x, y] of [[145, 150], [315, 390], [240, 270]]) {
+  for (const [x, y] of [[145, 150], [315, 390], [45, 210], [240, 450], [240, 270]]) {
     await page.mouse.click(x, y);
   }
   await page.clock.runFor(32);
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
-  await expect(page.locator("#orange-value")).toHaveText("0/2");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
+  await expect(page.locator("#orange-value")).toHaveText("0/4");
   await page.mouse.move(145, 150);
   await page.mouse.down();
   await page.mouse.move(700, 150);
   await page.mouse.up();
-  for (const [x, y] of [[635, 150], [815, 390]]) {
+  for (const [x, y] of [[635, 150], [815, 390], [915, 210], [710, 450]]) {
     await page.mouse.click(x, y);
   }
   await page.clock.runFor(32);
   await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
-  await expect(page.locator("#orange-value")).toHaveText("2/2");
+  await expect(page.locator("#orange-value")).toHaveText("4/4");
+});
+
+for (const side of ["left", "right"] as const) {
+  test(`the ${side} goal box allows one blocker and rejects a second even during a flick or table flip`, async ({ page }) => {
+    await openGame(page, true);
+    await frame(page, ...lineup);
+    const team = side === "left" ? "blue" : "orange";
+    const otherTeam = side === "left" ? "orange" : "blue";
+    const first = side === "left" ? supportLineup[0] : supportLineup[2];
+    const second = side === "left" ? lineup[1] : lineup[3];
+    const x = side === "left" ? 90 : 1830;
+    await frame(page, { ...first, x: side === "left" ? 400 : 1520, y: 620, p: Phase.Moved });
+    await expect(page.locator(`#${team}-value`)).toHaveText("4/4");
+    await expect(page.locator(`#${team}-prompt`)).toHaveText("Place 1 piece in your goal box.");
+    await frame(page, contact(90, 0, 960, 540, Type.Finger));
+    await frame(page, contact(90, 0, 1070, 540, Type.Finger, Phase.Ended));
+    await expect(page.locator(`#${team}-prompt`)).toHaveText("Place 1 piece in your goal box.");
+    await frame(page, { ...first, x, y: 460, p: Phase.Moved });
+    await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
+
+    await frame(page, contact(90, 0, 960, 540, Type.Finger));
+    await frame(page, contact(90, 0, 1070, 540, Type.Finger, Phase.Moved),
+      { ...second, x, y: 620, p: Phase.Moved });
+    await frame(page, contact(90, 0, 1070, 540, Type.Finger, Phase.Ended));
+    await expect(page.locator(`#${team}-value`)).toHaveText("4/4");
+    await expect(page.locator(`#${team}-prompt`)).toHaveText("Only 1 piece in your goal box. Move extras outside.");
+    await expect(page.locator(`#${otherTeam}-prompt`)).toHaveText("Team ready");
+
+    await page.locator("#flip").click();
+    await page.clock.runFor(32);
+    await expect(page.locator(`#${otherTeam}-prompt`)).toContainText("Only 1 piece");
+    await frame(page, { ...second, x: side === "left" ? 400 : 1520, y: 620, p: Phase.Moved });
+    await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
+    await flickOnBoard(page);
+  });
+}
+
+test("goal-box placement uses the touched, rotated base and counts pieces straddling the line", async ({ page }) => {
+  await openGame(page, true);
+  await frame(page, ...lineup.filter(({ id }) => id !== 12), contact(12, 5, 210, 620, Type.Glyph, Phase.Began, 90));
+  await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
+  const rotate = (touched: number) => frame(page, { ...contact(12, 5, 210, 620, Type.Glyph, Phase.Moved, 0), touched });
+  await rotate(0);
+  await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
+  await rotate(1);
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
+  await expect(page.locator("#blue-prompt")).toContainText("Only 1 piece");
+  await frame(page, contact(12, 5, 320, 620, Type.Glyph, Phase.Moved));
+  await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
+});
+
+test("goal-box limits include the painted top and bottom lines, not the larger penalty area", async ({ page }) => {
+  await openGame(page, true);
+  // Both copies sit in the penalty area, but only the lower one overlaps the
+  // small goal box. The other base initially clears its top line by half a pixel.
+  await frame(page, ...lineup.filter(({ id }) => id !== 12), contact(21, 3, 90, 540, Type.Glyph, Phase.Moved), contact(12, 1, 90, 312));
+  await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
+  await frame(page, contact(12, 1, 90, 313, Type.Glyph, Phase.Moved));
+  await expect(page.locator("#blue-prompt")).toContainText("Only 1 piece");
+  await frame(page, contact(12, 1, 90, 767, Type.Glyph, Phase.Moved));
+  await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
+  await frame(page, contact(12, 1, 90, 766, Type.Glyph, Phase.Moved));
+  await expect(page.locator("#blue-prompt")).toContainText("Only 1 piece");
+});
+
+test("browser setup permits free placement and dragging while enforcing the goal-box limit", async ({ page }) => {
+  await openGame(page);
+  await expect(page.locator("#blue-prompt")).toContainText("anywhere on your half");
+  await expect(page.locator("#blue-prompt")).toContainText("Keep 1 in the goal box");
+  for (const [x, y] of [[45, 230], [45, 310], [245, 420], [145, 150], [635, 150], [815, 390], [915, 210], [710, 450]]) {
+    await page.mouse.click(x, y);
+  }
+  await page.clock.runFor(32);
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
+  await expect(page.locator("#orange-value")).toHaveText("4/4");
+  await expect(page.locator("#blue-prompt")).toContainText("Only 1 piece");
+  await page.mouse.move(480, 270);
+  await page.mouse.down();
+  await page.clock.runFor(16);
+  await page.mouse.move(565, 270);
+  await page.mouse.up();
+  await page.clock.runFor(32);
+  await expect(page.locator("#blue-prompt")).toContainText("Only 1 piece");
+
+  const drag = async (fromX: number, fromY: number, x: number, y: number) => {
+    await page.mouse.move(fromX, fromY);
+    await page.mouse.down();
+    await page.mouse.move(x, y);
+    await page.mouse.up();
+    await page.clock.runFor(32);
+  };
+  await drag(45, 310, 315, 390);
+  await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
+  await drag(315, 390, 45, 310);
+  await expect(page.locator("#blue-prompt")).toContainText("Only 1 piece");
+  await drag(45, 310, 315, 390);
+  await drag(45, 230, 245, 250);
+  await expect(page.locator("#blue-prompt")).toHaveText("Place 1 piece in your goal box.");
+  await drag(245, 250, 45, 230);
+  await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
 });
 
 test("browser blockers cannot be dragged or rotated during play or between goals", async ({ page }) => {
   await openGame(page);
-  for (const [x, y] of [[145, 150], [315, 390], [695, 270], [815, 390]]) {
+  for (const [x, y] of [[145, 150], [315, 390], [695, 270], [815, 390], [45, 210], [240, 450], [915, 210], [710, 450]]) {
     await page.mouse.click(x, y);
   }
   await page.clock.runFor(32);
@@ -225,7 +331,7 @@ test("browser blockers cannot be dragged or rotated during play or between goals
   await page.locator("#reset-button").click({ force: true });
   await page.clock.runFor(32);
   await expect(page.locator("#auto-setup-button")).toBeEnabled();
-  await expect(page.locator("#blue-value")).toHaveText("0/2");
+  await expect(page.locator("#blue-value")).toHaveText("0/4");
 });
 
 test("an observed two-frame flick scores while a hand or canceled touch does not", async ({ page }) => {
@@ -251,7 +357,7 @@ test("an observed two-frame flick scores while a hand or canceled touch does not
 
   await restartBoardMatch(page);
   await frame(page, ...lineup);
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
   await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
   await page.evaluate(() => window.__board!.onPauseResult(JSON.stringify({ action: "EXIT_GAME_UNSAVED" })));
   await expect(page.locator("html")).toHaveAttribute("data-quit", "true");
@@ -360,9 +466,9 @@ test("native cancellation in successive frames pauses when the final contact can
   await openGame(page, true);
   await frame(page, ...lineup);
   await flickOnBoard(page);
-  await frame(page, ...lineup.slice(0, 3).map((piece) => ({ ...piece, p: Phase.Canceled })),
-    { ...lineup[3], p: Phase.Stationary });
-  await frame(page, { ...lineup[3], p: Phase.Canceled });
+  await frame(page, ...lineup.slice(0, -1).map((piece) => ({ ...piece, p: Phase.Canceled })),
+    { ...lineup[lineup.length - 1], p: Phase.Stationary });
+  await frame(page, { ...lineup[lineup.length - 1], p: Phase.Canceled });
   await page.clock.runFor(850);
   await expect(page.locator("#blue-prompt")).toHaveText("Ball in play");
   await expect(page.locator("#blue-value")).toHaveText("0");
@@ -375,9 +481,9 @@ test("continuing live play separates unrelated sensor cancellations", async ({ p
   await openGame(page, true);
   await frame(page, ...lineup);
   await flickOnBoard(page);
-  await frame(page, ...lineup.slice(0, 3).map((piece) => ({ ...piece, p: Phase.Canceled })));
-  await frame(page, { ...lineup[3], x: 1590, p: Phase.Moved });
-  await frame(page, { ...lineup[3], p: Phase.Canceled });
+  await frame(page, ...lineup.slice(0, -1).map((piece) => ({ ...piece, p: Phase.Canceled })));
+  await frame(page, { ...lineup[lineup.length - 1], x: 1590, p: Phase.Moved });
+  await frame(page, { ...lineup[lineup.length - 1], p: Phase.Canceled });
   await page.clock.runFor(850);
   await expect(page.locator("#blue-value")).toHaveText("1");
 });
@@ -391,7 +497,7 @@ test("a delayed release after a sensor interruption cannot finish an old swipe",
   await frame(page, contact(90, 0, 1070, 540, Type.Finger, Phase.Ended));
   await page.evaluate(() => window.__board!.onPauseResult(JSON.stringify({ action: "RESUME" })));
   await page.clock.runFor(700);
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
   await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
   await flickOnBoard(page);
 });
@@ -403,9 +509,9 @@ test("a focus change preserves stationary defenders when the tracker keeps their
   await frame(page);
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await frame(page);
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
   await frame(page, { ...lineup[3], p: Phase.Stationary });
-  await expect(page.locator("#orange-value")).toHaveText("2/2");
+  await expect(page.locator("#orange-value")).toHaveText("4/4");
   await flickOnBoard(page);
 });
 
@@ -417,8 +523,8 @@ test("a trailing stationary sample from the old tracker cannot mask a post-focus
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await frame(page, ...lineup.slice(1).map((piece) => ({ ...piece, id: piece.id + 100 })));
   await frame(page);
-  await expect(page.locator("#blue-value")).toHaveText("1/2");
-  await expect(page.locator("#orange-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("3/4");
+  await expect(page.locator("#orange-value")).toHaveText("4/4");
 });
 
 test("a finger reclassified through a blob cannot reuse an earlier swipe origin", async ({ page }) => {
@@ -438,8 +544,8 @@ test("one recycled ID and an extra copy leave the rest of a stationary lineup in
   await page.evaluate(() => window.dispatchEvent(new Event("blur")));
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await frame(page, { ...lineup[0], p: Phase.Ended }, lineup[0]);
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
-  await expect(page.locator("#orange-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
+  await expect(page.locator("#orange-value")).toHaveText("4/4");
   await frame(page, contact(55, 5, 1100, 400));
   await flickOnBoard(page);
   await page.clock.runFor(1400);
@@ -453,14 +559,14 @@ test("a new tracker can reuse the other team's contact IDs during a paused shot"
   await flickOnBoard(page);
   await page.evaluate(() => window.dispatchEvent(new Event("blur")));
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  const ids = [15, 112, 11, 116];
+  const ids = [15, 112, 11, 116, 121, 122, 125, 126];
   await frame(page, ...pieces.map((piece, index) => ({ ...piece, id: ids[index] })));
   await page.clock.runFor(1500);
   await expect(page.locator("#orange-value")).toHaveText("1");
 });
 
 for (const separateFrames of [false, true]) {
-  test(`a confirmed goalie keeps its slot when a third piece arrives in ${separateFrames ? "a prior" : "the same"} frame`, async ({ page }) => {
+  test(`a confirmed goalie keeps its slot when a fifth piece arrives in ${separateFrames ? "a prior" : "the same"} frame`, async ({ page }) => {
     await openGame(page, true);
     const goalie = contact(15, 5, 1390, 540, Type.Glyph, Phase.Moved);
     await frame(page, ...lineup, goalie);
@@ -523,8 +629,8 @@ test("late tracker IDs replace cached poses after the physics grace period", asy
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   for (let i = 0; i < 22; i++) await frame(page);
   await frame(page, ...lineup.slice(1).map((piece) => ({ ...piece, id: piece.id + 100 })));
-  await expect(page.locator("#blue-value")).toHaveText("1/2");
-  await expect(page.locator("#orange-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("3/4");
+  await expect(page.locator("#orange-value")).toHaveText("4/4");
 });
 
 test("independent ID handoffs during play preserve unrelated stationary defenders", async ({ page }) => {
@@ -539,8 +645,8 @@ test("independent ID handoffs during play preserve unrelated stationary defender
   const remaining = lineup.slice(2);
   await frame(page, ...remaining.map((piece) => ({ ...piece, id: piece.id + 100 })));
   await frame(page, ...remaining.map((piece) => ({ ...piece, p: Phase.Ended })));
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
-  await expect(page.locator("#orange-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
+  await expect(page.locator("#orange-value")).toHaveText("4/4");
   await flickOnBoard(page);
 });
 
@@ -554,14 +660,14 @@ test("a menu result can confirm a tracker restart after the new IDs have already
   await frame(page);
   await page.evaluate(() => window.__board!.onPauseResult(JSON.stringify({ action: "RESUME" })));
   await page.clock.runFor(32);
-  await expect(page.locator("#blue-value")).toHaveText("1/2");
-  await expect(page.locator("#orange-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("3/4");
+  await expect(page.locator("#orange-value")).toHaveText("4/4");
   await frame(page);
-  await expect(page.locator("#blue-value")).toHaveText("1/2");
+  await expect(page.locator("#blue-value")).toHaveText("3/4");
 });
 
 for (const samePoses of [0, 1]) {
-  test(`three returning blockers with ${samePoses} unchanged poses leave the lifted slot empty`, async ({ page }) => {
+  test(`seven returning blockers with ${samePoses} unchanged poses leave the lifted slot empty`, async ({ page }) => {
     await openGame(page, true);
     await frame(page, ...lineup);
     await page.evaluate(() => window.dispatchEvent(new Event("blur")));
@@ -570,8 +676,8 @@ for (const samePoses of [0, 1]) {
       ...piece, id: piece.id + 100, y: index < samePoses ? piece.y : piece.y + (piece.y < 540 ? 140 : -140),
     })));
     await frame(page);
-    await expect(page.locator("#blue-value")).toHaveText("1/2");
-    await expect(page.locator("#orange-value")).toHaveText("2/2");
+    await expect(page.locator("#blue-value")).toHaveText("3/4");
+    await expect(page.locator("#orange-value")).toHaveText("4/4");
   });
 }
 
@@ -587,14 +693,14 @@ for (const switchHalves of [false, true]) {
       y: piece.y + (piece.y < 540 ? 110 : -110),
     })));
     await frame(page);
-    await expect(page.locator("#blue-value")).toHaveText("1/2");
-    await expect(page.locator("#orange-value")).toHaveText("1/2");
+    await expect(page.locator("#blue-value")).toHaveText("3/4");
+    await expect(page.locator("#orange-value")).toHaveText("3/4");
     await expect(page.locator("#blue-prompt")).toContainText("Place");
   });
 }
 
 for (const missing of ["straddling midfield", "lifted during pause"]) {
-  test(`a relocated lineup with two pieces ${missing} stays at one per half`, async ({ page }) => {
+  test(`a relocated lineup with two pieces ${missing} stays at three per half`, async ({ page }) => {
     await openGame(page, true);
     const partial = lineup.filter((piece) => piece.g !== 1 && piece.g !== 5);
     const straddling = [contact(11, 1, 960, 300), contact(15, 5, 960, 780)];
@@ -604,8 +710,8 @@ for (const missing of ["straddling midfield", "lifted during pause"]) {
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await frame(page, ...returning.map((piece) => ({ ...piece, id: piece.id + 100, y: piece.y + (piece.y < 540 ? 110 : -110) })));
     await frame(page);
-    await expect(page.locator("#blue-value")).toHaveText("1/2");
-    await expect(page.locator("#orange-value")).toHaveText("1/2");
+    await expect(page.locator("#blue-value")).toHaveText("3/4");
+    await expect(page.locator("#orange-value")).toHaveText("3/4");
   });
 }
 
@@ -621,13 +727,13 @@ for (const { cross, delay } of [{ cross: false, delay: 0 }, { cross: true, delay
       ...piece, id: piece.id + 100, x: cross ? 1920 - piece.x : piece.x, y: piece.y + (piece.y < 540 ? 110 : -110),
     }));
     await frame(page, fresh[0]);
-    await expect(page.locator("#blue-value")).toHaveText(cross ? "0/2" : "1/2");
-    await expect(page.locator("#orange-value")).toHaveText(cross ? "2/2" : "1/2");
+    await expect(page.locator("#blue-value")).toHaveText(cross ? "2/4" : "3/4");
+    await expect(page.locator("#orange-value")).toHaveText(cross ? "4/4" : "3/4");
     await frame(page, contact(90, 0, 960, 540, Type.Finger));
     await frame(page, contact(90, 0, 1070, 540, Type.Finger, Phase.Ended));
     await frame(page, fresh[1]);
-    await expect(page.locator("#blue-value")).toHaveText("1/2");
-    await expect(page.locator("#orange-value")).toHaveText("1/2");
+    await expect(page.locator("#blue-value")).toHaveText("3/4");
+    await expect(page.locator("#orange-value")).toHaveText("3/4");
     await expect(page.locator("#blue-prompt")).toContainText("Place");
   });
 }
@@ -642,8 +748,8 @@ test("additional copies fill vacant slots after the original IDs are confirmed",
   await frame(page, contact(105, 2, 410, 540), contact(106, 6, 1450, 540));
   await page.clock.runFor(1100);
   await frame(page);
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
-  await expect(page.locator("#orange-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
+  await expect(page.locator("#orange-value")).toHaveText("4/4");
 });
 
 test("a whole team changing IDs keeps the other stationary team's slots", async ({ page }) => {
@@ -651,12 +757,12 @@ test("a whole team changing IDs keeps the other stationary team's slots", async 
   await frame(page, ...lineup);
   await page.evaluate(() => window.dispatchEvent(new Event("blur")));
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  const blue = lineup.slice(0, 2);
+  const blue = lineup.filter(({ x }) => x < 960);
   await frame(page, ...blue.map((piece) => ({ ...piece, id: piece.id + 100, y: piece.y + (piece.y < 540 ? 110 : -110) })));
-  await expect(page.locator("#orange-value")).toHaveText("2/2");
+  await expect(page.locator("#orange-value")).toHaveText("4/4");
   await frame(page, ...blue.map((piece) => ({ ...piece, p: Phase.Ended })));
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
-  await expect(page.locator("#orange-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
+  await expect(page.locator("#orange-value")).toHaveText("4/4");
 });
 
 for (const duplicateTypes of [false, true]) {
@@ -670,13 +776,13 @@ for (const duplicateTypes of [false, true]) {
     await frame(page, fresh[0]);
     await page.evaluate(() => window.__board!.onPauseResult(JSON.stringify({ action: "RESUME" })));
     await frame(page);
-    await expect(page.locator("#blue-value")).toHaveText("1/2");
-    await expect(page.locator("#orange-value")).toHaveText("1/2");
+    await expect(page.locator("#blue-value")).toHaveText("3/4");
+    await expect(page.locator("#orange-value")).toHaveText("3/4");
     await frame(page, contact(90, 0, 960, 540, Type.Finger));
     await frame(page, contact(90, 0, 1070, 540, Type.Finger, Phase.Ended));
     await frame(page, fresh[1]);
-    await expect(page.locator("#blue-value")).toHaveText("1/2");
-    await expect(page.locator("#orange-value")).toHaveText("1/2");
+    await expect(page.locator("#blue-value")).toHaveText("3/4");
+    await expect(page.locator("#orange-value")).toHaveText("3/4");
   });
 }
 
@@ -690,11 +796,11 @@ test("ambiguous duplicates after focus cannot open a kickoff window", async ({ p
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   const fresh = partial.map((piece) => ({ ...piece, id: piece.id + 100, y: piece.y + (piece.y < 540 ? 110 : -110) }));
   await frame(page, fresh[0]);
-  await expect(page.locator("#blue-value")).toHaveText("1/2");
-  await expect(page.locator("#orange-value")).toHaveText("1/2");
+  await expect(page.locator("#blue-value")).toHaveText("3/4");
+  await expect(page.locator("#orange-value")).toHaveText("3/4");
   await frame(page, fresh[1]);
-  await expect(page.locator("#blue-value")).toHaveText("1/2");
-  await expect(page.locator("#orange-value")).toHaveText("1/2");
+  await expect(page.locator("#blue-value")).toHaveText("3/4");
+  await expect(page.locator("#orange-value")).toHaveText("3/4");
 });
 
 for (const menuBetweenBatches of [false, true]) {
@@ -707,7 +813,7 @@ for (const menuBetweenBatches of [false, true]) {
       await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     }
     const ids = [16, 12];
-    const fresh = partial.map((piece, i) => ({ ...piece, id: ids[i], y: piece.y + (piece.y < 540 ? 110 : -110) }));
+    const fresh = partial.map((piece, i) => ({ ...piece, id: ids[i] ?? piece.id + 100, y: piece.y + (piece.y < 540 ? 110 : -110) }));
     await frame(page, fresh[0]);
     if (menuBetweenBatches) await page.evaluate(() => window.__board!.onPauseResult(JSON.stringify({ action: "RESUME" })));
     await frame(page);
@@ -715,12 +821,12 @@ for (const menuBetweenBatches of [false, true]) {
     await frame(page, contact(90, 0, 960, 540, Type.Finger));
     await frame(page, contact(90, 0, 1070, 540, Type.Finger, Phase.Ended));
     await frame(page, fresh[1]);
-    await expect(page.locator("#blue-value")).toHaveText("1/2");
-    await expect(page.locator("#orange-value")).toHaveText("1/2");
+    await expect(page.locator("#blue-value")).toHaveText("3/4");
+    await expect(page.locator("#orange-value")).toHaveText("3/4");
   });
 }
 
-test("a third copy can fill a later vacancy on a previously full side", async ({ page }) => {
+test("a fifth copy can fill a later vacancy on a previously full side", async ({ page }) => {
   await openGame(page, true);
   await frame(page, ...lineup);
   await page.evaluate(() => window.dispatchEvent(new Event("blur")));
@@ -729,8 +835,8 @@ test("a third copy can fill a later vacancy on a previously full side", async ({
   await frame(page, { ...lineup[0], p: Phase.Ended });
   await page.clock.runFor(1100);
   await frame(page);
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
-  await expect(page.locator("#orange-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
+  await expect(page.locator("#orange-value")).toHaveText("4/4");
 });
 
 test("repeated handoffs of one base cannot fill an empty defender slot", async ({ page }) => {
@@ -738,15 +844,15 @@ test("repeated handoffs of one base cannot fill an empty defender slot", async (
   await frame(page, ...lineup.slice(1));
   for (const id of [112, 212]) {
     await frame(page, { ...lineup[1], id });
-    await expect(page.locator("#blue-value")).toHaveText("1/2");
+    await expect(page.locator("#blue-value")).toHaveText("3/4");
   }
   await frame(page, { ...lineup[1], id: 212, x: 370, p: Phase.Moved });
-  await expect(page.locator("#blue-value")).toHaveText("1/2");
+  await expect(page.locator("#blue-value")).toHaveText("3/4");
   await frame(page, lineup[0]);
   await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
 });
 
-test("a tracked goalie keeps its slot ahead of a waiting third contact during an ID handoff", async ({ page }) => {
+test("a tracked goalie keeps its slot ahead of a waiting fifth contact during an ID handoff", async ({ page }) => {
   await openGame(page, true);
   const goalie = { ...lineup[2], x: 1390, y: 540 };
   await frame(page, ...lineup, { ...goalie, p: Phase.Moved });
@@ -834,7 +940,7 @@ test("one reclassified arrival cannot displace two paused defenders", async ({ p
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await frame(page, { ...lineup[0], id: 45, g: 2 });
   await frame(page, { ...lineup[0], id: 45, p: Phase.Moved });
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
   await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
 });
 
@@ -872,11 +978,11 @@ test("a continuing tracker keeps other defenders through a later group of local 
   const moved = lineup.slice(1);
   await frame(page, ...moved.map((piece) => ({ ...piece, id: piece.id + 100 })));
   await frame(page, ...moved.map((piece) => ({ ...piece, p: Phase.Ended })));
-  await expect(page.locator("#blue-value")).toHaveText("2/2");
-  await expect(page.locator("#orange-value")).toHaveText("2/2");
+  await expect(page.locator("#blue-value")).toHaveText("4/4");
+  await expect(page.locator("#orange-value")).toHaveText("4/4");
 });
 
-test("a waiting third copy cannot become a goalie when the incumbent lifts during a paused shot", async ({ page }) => {
+test("a waiting fifth copy cannot become a goalie when the incumbent lifts during a paused shot", async ({ page }) => {
   await openGame(page, true);
   await frame(page, ...lineup, contact(55, 5, 1390, 540));
   await flickOnBoard(page);
@@ -929,10 +1035,9 @@ test("a blocker stays fixed when its contact ends during a paused shot", async (
   await expect(page.locator("#orange-value")).toHaveText("1");
 });
 
-test("a blocker stays fixed when its glyph or position changes during a shot", async ({ page }) => {
-  await openGame(page, true);
-  for (const leaveHalf of [false, true]) {
-    await restartBoardMatch(page);
+for (const leaveHalf of [false, true]) {
+  test(`a blocker stays fixed when its glyph changes during a shot with leaving-half ${leaveHalf}`, async ({ page }) => {
+    await openGame(page, true);
     await frame(page, ...lineup, contact(15, 6, 1390, 540, Type.Glyph, Phase.Moved));
     await flickOnBoard(page);
     if (leaveHalf) await frame(page, contact(15, 6, 1390, 10, Type.Glyph, Phase.Moved));
@@ -940,8 +1045,8 @@ test("a blocker stays fixed when its glyph or position changes during a shot", a
     await page.clock.runFor(1500);
     await expect(page.locator("#orange-value")).toHaveText("1");
     await expect(page.locator("#blue-value")).toHaveText("0");
-  }
-});
+  });
+}
 
 test("reclassification cannot move a blocker into a shot", async ({ page }) => {
   await openGame(page, true);
@@ -997,7 +1102,7 @@ test("the hockey base can clear the kickoff ball with its front notch", async ({
   await frame(page, ...lineup.slice(1), contact(11, 2, 885, 540));
   await expect(page.locator("#blue-prompt")).toHaveText("Flick the ball");
   await frame(page, contact(11, 2, 892, 540, Type.Glyph, Phase.Moved));
-  await expect(page.locator("#blue-value")).toHaveText("1/2");
+  await expect(page.locator("#blue-value")).toHaveText("3/4");
 });
 
 test("movement and touch cannot change a blocker after kickoff", async ({ page }) => {
@@ -1062,8 +1167,8 @@ for (const timing of ["before focus", "after focus", "without a focus event"]) {
       await resume();
     }
     await page.clock.runFor(32);
-    await expect(page.locator("#blue-value")).toHaveText("1/2");
-    await expect(page.locator("#orange-value")).toHaveText("2/2");
+    await expect(page.locator("#blue-value")).toHaveText("3/4");
+    await expect(page.locator("#orange-value")).toHaveText("4/4");
     await frame(page, fresh[0]);
     await flickOnBoard(page);
     await page.clock.runFor(650);
@@ -1113,21 +1218,21 @@ for (const when of ["before focus", "after focus"]) {
 
 test("placement checks the rotated tennis base at midfield, the rail and the kickoff spot", async ({ page }) => {
   await openGame(page, true);
-  await frame(page, ...lineup.slice(0, 1), contact(14, 5, 880, 300, Type.Glyph, Phase.Began, 90));
+  await frame(page, ...lineup.filter(({ id }) => id !== 12), contact(14, 5, 880, 300, Type.Glyph, Phase.Began, 90));
   const count = page.locator("#blue-value");
-  await expect(count).toHaveText("2/2");
+  await expect(count).toHaveText("4/4");
   const move = (x: number, y: number, angle: number) =>
     frame(page, { ...contact(14, 5, x, y, Type.Glyph, Phase.Moved, angle), touched: 1 });
   await move(880, 300, 180);
-  await expect(count).toHaveText("1/2");
+  await expect(count).toHaveText("3/4");
   await move(320, 70, 0);
-  await expect(count).toHaveText("2/2");
+  await expect(count).toHaveText("4/4");
   await move(320, 70, 90);
-  await expect(count).toHaveText("1/2");
+  await expect(count).toHaveText("3/4");
   await move(878, 540, 90);
-  await expect(count).toHaveText("2/2");
+  await expect(count).toHaveText("4/4");
   await move(896, 540, 90);
-  await expect(count).toHaveText("1/2");
+  await expect(count).toHaveText("3/4");
 });
 
 test("19px and 21px opening movements both preserve the peak of a 130px Board flick", async ({ page }) => {
@@ -1201,7 +1306,7 @@ for (const reversed of [false, true]) {
     await openGame(page, true);
     const pair = [contact(15, 1, 1340, 480), contact(16, 1, 1340, 600)];
     if (reversed) pair.reverse();
-    await frame(page, ...lineup.slice(0, 2), ...pair);
+    await frame(page, ...lineup.slice(0, 2), ...supportLineup, ...pair);
     await flickOnBoard(page);
     await page.clock.runFor(1100);
     await expect(page.locator("#orange-prompt")).toHaveText("Goal!");

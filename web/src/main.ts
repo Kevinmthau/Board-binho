@@ -93,7 +93,12 @@ const FIELD_SCREEN_FILL = 0.94;
 const FIELD_BACKGROUND_ASPECT = BOARD_WIDTH / BOARD_HEIGHT;
 const GOAL_MOUTH_TOP_PIXEL_Y = 374;
 const GOAL_MOUTH_BOTTOM_PIXEL_Y = 704;
-const DEFENDERS_PER_SIDE = 2;
+// Outer edges of the small white boxes in field_background.png.
+const GOAL_BOX_PIXEL_BOUNDS = {
+  left: { min: { x: 0, y: 373 }, max: { x: 136, y: 706 } },
+  right: { min: { x: 1780, y: 373 }, max: { x: BOARD_WIDTH, y: 706 } },
+};
+const DEFENDERS_PER_SIDE = 4;
 const REDETECTION_WINDOW_MS = 900;
 const BOARD_RESUME_GRACE_MS = 250;
 const OFF_BOARD_GOAL_CLEARANCE = 0.22;
@@ -143,6 +148,8 @@ engine.gravity.x = 0;
 engine.gravity.y = 0;
 
 let layout = createLayout();
+// Placement queries only: these rectangles never enter the physics world.
+const goalBoxes = { left: createGoalBox("left"), right: createGoalBox("right") };
 let ballBody: Matter.Body | null = null;
 let ballInPlay = true;
 let lastFrameTimestamp = performance.now();
@@ -466,6 +473,11 @@ function handleBoardContacts(contacts: readonly BoardContact[], reported: BoardF
   const gameChanges = buttons.size ? new Map([...reported].filter(([id]) => !buttons.has(id))) : reported;
   if (lesson) {
     for (const [id, change] of gameChanges) for (const trace of change.fingerTraces ?? []) {
+      // A canceled gesture in one packet must not fire from its earlier poses.
+      if (trace.terminal === BoardContactPhase.Canceled) {
+        lesson.finger(id, { x: 0, y: 0 }, "cancel");
+        continue;
+      }
       for (const [i, p] of trace.points.entries()) lesson.finger(id, logicalPoint(p.x / BOARD_WIDTH, p.y / BOARD_HEIGHT), trace.began && !i ? "down" : "move");
       if (trace.terminal !== undefined) {
         const last = trace.releasePosition ?? trace.points[trace.points.length - 1];
@@ -1265,6 +1277,25 @@ function countDefenders(side: PlayerSide): number {
   return count;
 }
 
+function createGoalBox(side: PlayerSide): Matter.Body {
+  const { min, max } = GOAL_BOX_PIXEL_BOUNDS[side];
+  const unitsPerPixel = layout.fieldBackgroundHeight / BOARD_HEIGHT;
+  return Matter.Bodies.rectangle(
+    ((min.x + max.x) / 2 - BOARD_WIDTH / 2) * unitsPerPixel,
+    (BOARD_HEIGHT / 2 - (min.y + max.y) / 2) * unitsPerPixel,
+    (max.x - min.x) * unitsPerPixel,
+    (max.y - min.y) * unitsPerPixel,
+    { isStatic: true },
+  );
+}
+
+function countGoalBoxDefenders(side: PlayerSide): number {
+  const bodies = [...defenders.values()].filter((defender) => defender.side === side).map(({ body }) => body);
+  // Query the rotated base shapes, including their concave parts, so a piece
+  // straddling the box line counts even when its sensor origin is outside.
+  return Matter.Query.collides(goalBoxes[side], bodies).length;
+}
+
 function updateDefenders(
   contacts: ReadonlyMap<number, DefenderContact>, reported?: BoardFrameChanges,
 ): void {
@@ -1594,12 +1625,15 @@ function autoSetupDefenders(): void {
   simulatedContacts.clear();
   const pieces = sportsPieces.values();
   for (const side of [-1, 1]) {
-    for (let index = 0; index < DEFENDERS_PER_SIDE; index++) {
+    const positions = [
+      { x: side * layout.pitchHalfWidth * 0.90, y: layout.pitchHalfHeight * 0.22 },
+      { x: side * layout.pitchHalfWidth * 0.50, y: layout.pitchHalfHeight * 0.43 },
+      { x: side * layout.pitchHalfWidth * 0.50, y: -layout.pitchHalfHeight * 0.43 },
+      { x: side * layout.pitchHalfWidth * 0.75, y: -layout.pitchHalfHeight * 0.60 },
+    ];
+    for (const position of positions) {
       const piece = pieces.next().value!;
-      addSimulatedDefender(piece, {
-        x: side * layout.pitchHalfWidth * 0.5,
-        y: (index === 0 ? -0.43 : 0.43) * layout.pitchHalfHeight,
-      });
+      addSimulatedDefender(piece, position);
     }
   }
   updateDefenders(simulatedContacts);
@@ -1964,8 +1998,12 @@ function renderUi(): void {
 
 function getSeatPrompt(side: PlayerSide, count: number): string {
   switch (phase) {
-    case "setup":
-      return count === DEFENDERS_PER_SIDE ? "Team ready" : `Place any ${DEFENDERS_PER_SIDE} Sports pieces on your half.`;
+    case "setup": {
+      const inGoalBox = countGoalBoxDefenders(side);
+      if (inGoalBox > 1) return "Only 1 piece in your goal box. Move extras outside.";
+      if (count === DEFENDERS_PER_SIDE) return inGoalBox === 1 ? "Team ready" : "Place 1 piece in your goal box.";
+      return `Place ${DEFENDERS_PER_SIDE} pieces anywhere on your half. Keep 1 in the goal box.`;
+    }
     case "readyToShoot":
       if (side === currentTurn) return "Flick the ball";
       return screens.names[currentTurn === "left" ? 0 : 1] + " to shoot";
@@ -1985,7 +2023,10 @@ function kickoffCount(side: PlayerSide): number {
 }
 
 function CanPlayWithCurrentDefenders(): boolean {
-  return didServeInitialKickoff || (kickoffCount("left") === DEFENDERS_PER_SIDE && kickoffCount("right") === DEFENDERS_PER_SIDE);
+  return didServeInitialKickoff || (
+    kickoffCount("left") === DEFENDERS_PER_SIDE && kickoffCount("right") === DEFENDERS_PER_SIDE &&
+    countGoalBoxDefenders("left") === 1 && countGoalBoxDefenders("right") === 1
+  );
 }
 
 function getBallPosition(): Vec {

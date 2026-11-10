@@ -12,6 +12,7 @@ This repository is **Flick Soccer**, a Board Web App.
 - The build and packed ZIP must contain no web addresses, including in asset metadata.
 - Keep asset source links in repository documentation and preserve shipped license terms.
 - Pieces are placed once before kickoff and stay fixed as blockers for the whole match. Only the ball is swiped during play.
+- Each player places four pieces on their own half: exactly one base overlapping their small goal box and three anywhere outside it. Kickoff waits for all eight valid placements.
 - Touch gates orientation updates during setup. Menu, swipe practice, flip, and profile flows have browser regressions.
 
 ## Project identity
@@ -22,7 +23,7 @@ This repository is **Flick Soccer**, a Board Web App.
 - Web app source: `web/`
 - Vendored SDK: `vendor/board.fun-web-sdk-1.0.0-beta.6.tgz`
 - SDK source: `/Users/kevinthau/Board Studio/board.fun-web-sdk-1.0.0-beta.6.tgz`
-- Piece set: Board Sports v0.1.0, four blockers total, two per half. Any Sports piece can defend either side. Do not draw circular piece markers on the Board.
+- Piece set: Board Sports v0.1.0, eight blockers total, four per half. Any Sports piece can defend either side. Do not draw circular piece markers on the Board.
 - Piece model: `web/public/model.tflite` (SHA-256 `4d75343e149b72f8410cad10f518c64791634ae6e6932880088a34c164026ad9`).
 
 ## Build and deploy loop

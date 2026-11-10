@@ -1,11 +1,23 @@
 import { byId } from "./screens";
 
 type Point = { x: number; y: number };
+type PracticeSwipe = { last: Point; origin?: Point };
 const ball = { x: 0.5, y: 0.5 };
+const aspect = 0.5625;
+
+function ballContact(from: Point, to: Point): Point | undefined {
+  const dx = to.x - from.x, dy = (to.y - from.y) * aspect;
+  const lengthSquared = dx * dx + dy * dy;
+  const t = lengthSquared ? Math.max(0, Math.min(1,
+    ((ball.x - from.x) * dx + (ball.y - from.y) * aspect * dy) / lengthSquared,
+  )) : 0;
+  const closest = { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+  return Math.hypot(closest.x - ball.x, (closest.y - ball.y) * aspect) < 0.055 ? closest : undefined;
+}
 
 export class ShotLesson {
   private complete = false;
-  private fingers = new Map<number, Point>();
+  private fingers = new Map<number, PracticeSwipe>();
   private elapsed = 0;
   private retry = false;
   private wonAt = 0;
@@ -25,19 +37,23 @@ export class ShotLesson {
     }
     if (this.complete) return;
     if (phase === "down") {
-      if (Math.hypot(point.x - ball.x, (point.y - ball.y) * 0.5625) < 0.055)
-        this.fingers.set(id, point);
+      this.fingers.set(id, { last: point, origin: ballContact(point, point) });
       return;
     }
-    const start = this.fingers.get(id);
-    if (!start || phase !== "up") return;
-    this.fingers.delete(id);
-    const dx = point.x - start.x, dy = point.y - start.y;
-    if (dx > 0.03 && Math.abs(dy) * 0.5625 < dx * 0.8) {
+    const swipe = this.fingers.get(id);
+    if (!swipe) return;
+    // A finger can start beside the ball and sweep through it. Test each
+    // segment so sparse sensor frames work without accepting a path around it.
+    swipe.origin ??= ballContact(swipe.last, point);
+    swipe.last = point;
+    if (phase === "up") this.fingers.delete(id);
+    const dx = point.x - (swipe.origin?.x ?? point.x), dy = point.y - (swipe.origin?.y ?? point.y);
+    // Respond during the gesture, as match shots do; lifting is not required.
+    if (dx > 0.03 && Math.abs(dy) * aspect < dx * 0.8) {
       this.wonAt = this.elapsed;
       this.complete = true;
       this.fingers.clear();
-    } else {
+    } else if (phase === "up") {
       this.retry = true;
     }
     this.coach();
